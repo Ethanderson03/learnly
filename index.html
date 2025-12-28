@@ -61,9 +61,7 @@
                 onClick={() => onSelect(node.id)}
               >
                 <div className="title">
-                  <span className="dot" aria-hidden />
                   <span className="text">{node.title}</span>
-                  <span className="badge">{node.layerLabel}</span>
                 </div>
                 <div className="meta">
                   {node.children.length} fork{node.children.length === 1 ? "" : "s"} • {node.messages.length} message{node.messages.length === 1 ? "" : "s"}
@@ -155,12 +153,7 @@
                     </span>
                   ))}
                 </div>
-                <div className="meta-row">
-                  <span className="timeline-chip">Branch depth: {node.depth}</span>
-                  <span className="timeline-chip">Messages: {node.messages.length}</span>
-                </div>
               </div>
-              <div className="badge">Active</div>
             </div>
             <div className="chat-body">
               <MessageList messages={node.messages} />
@@ -299,8 +292,11 @@
         };
 
         const makeTitle = (parentTitle, selection) => {
-          if (selection) return `Fork of ${parentTitle}: "${selection.slice(0, 24)}..."`;
-          return `Fork of ${parentTitle}`;
+          if (selection) {
+            const trimmed = selection.slice(0, 32);
+            return `${trimmed}${selection.length > 32 ? "..." : ""}`;
+          }
+          return `${parentTitle} branch`;
         };
 
         const handleFork = (fromId, explicitSelection) => {

@@ -1,15 +1,15 @@
 :root {
-  --bg: #f5f7fb;
+  --bg: #ffffff;
   --card: #ffffff;
-  --panel: #eef1f6;
-  --accent: #2563eb;
-  --accent-strong: #1e3a8a;
-  --text: #111827;
-  --muted: #6b7280;
-  --border: #e5e7eb;
+  --panel: #ffffff;
+  --accent: #111111;
+  --accent-strong: #111111;
+  --text: #0f172a;
+  --muted: #475569;
+  --border: #000000;
   --shadow: none;
   --shadow-strong: none;
-  --pill: #e7ecf5;
+  --pill: #ffffff;
 }
 
 * {
@@ -28,7 +28,7 @@ body {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 300px 1fr;
+  grid-template-columns: 260px 1fr;
   width: 100%;
   min-height: 100vh;
   position: relative;
@@ -39,7 +39,7 @@ body {
 .sidebar {
   background: var(--panel);
   border-right: 1px solid var(--border);
-  padding: 16px;
+  padding: 12px;
   overflow-y: auto;
   position: sticky;
   top: 0;
@@ -58,14 +58,14 @@ body {
 
 .sidebar h1 {
   margin: 0 0 6px;
-  font-size: 18px;
+  font-size: 16px;
   color: var(--text);
 }
 
 .sidebar .hint {
   color: var(--muted);
-  font-size: 13px;
-  margin-bottom: 12px;
+  font-size: 12px;
+  margin-bottom: 10px;
 }
 
 .sidebar-header .primary-btn {
@@ -80,34 +80,32 @@ body {
 
 .tree-branch {
   display: grid;
-  grid-template-columns: 12px 1fr;
-  align-items: center;
+  grid-template-columns: 10px 1fr;
+  align-items: start;
 }
 
 .branch-line {
   border-left: 1px solid var(--border);
   height: 100%;
-  transform: translateX(5px);
+  transform: translateX(4px);
 }
 
 .tree-node {
-  padding: 10px 12px;
-  border-radius: 12px;
-  margin: 4px 0 8px;
+  padding: 8px 10px;
+  margin: 0 0 6px;
   background: #fff;
   border: 1px solid var(--border);
-  transition: border 0.2s ease, background 0.2s ease;
+  transition: background 0.2s ease;
   cursor: pointer;
 }
 
 .tree-node:hover {
-  border-color: #cbd5e1;
   background: #f8fafc;
 }
 
 .tree-node.active {
-  border: 1px solid #2563eb;
-  background: #eef2ff;
+  border: 1px solid #000;
+  background: #f1f5f9;
 }
 
 .tree-node .title {
@@ -118,20 +116,13 @@ body {
   color: var(--text);
 }
 
-.tree-node .title .dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--accent);
-  display: inline-block;
-}
-
 .tree-node .title .text {
   flex: 1;
+  font-size: 14px;
 }
 
 .tree-node .meta {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--muted);
   margin-top: 4px;
 }
@@ -143,7 +134,7 @@ body {
 
 
 .main {
-  padding: 26px;
+  padding: 18px 22px;
   display: flex;
   justify-content: center;
   align-items: stretch;
@@ -156,7 +147,7 @@ body {
   margin: 0 auto;
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 18px;
+  border-radius: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -169,7 +160,7 @@ body {
   justify-content: space-between;
   align-items: center;
   padding: 18px 20px;
-  background: #f5f7fb;
+  background: #ffffff;
   border-bottom: 1px solid var(--border);
 }
 
@@ -189,14 +180,14 @@ body {
 .message {
   margin-bottom: 14px;
   padding: 12px 14px;
-  border-radius: 14px;
+  border-radius: 0;
   border: 1px solid var(--border);
-  background: #f7f9fb;
+  background: #ffffff;
 }
 
 .message.user {
-  background: #e9f2ff;
-  border-color: #cbdffb;
+  background: #ffffff;
+  border-color: #000000;
 }
 
 .message .role {
@@ -216,7 +207,7 @@ body {
 .composer {
   border-top: 1px solid var(--border);
   padding: 12px 14px 16px;
-  background: #f5f7fb;
+  background: #ffffff;
 }
 
 
@@ -230,7 +221,7 @@ body {
 textarea {
   flex: 1;
   padding: 10px 12px;
-  border-radius: 14px;
+  border-radius: 0;
   border: 1px solid var(--border);
   background: #ffffff;
   color: var(--text);
@@ -239,27 +230,26 @@ textarea {
 }
 
 textarea:focus {
-  outline: 2px solid #cbd5e1;
+  outline: 1px solid #000;
 }
 
 button {
-  border: none;
+  border: 1px solid #000;
   padding: 10px 14px;
-  border-radius: 12px;
+  border-radius: 0;
   cursor: pointer;
   font-weight: 600;
   transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
 }
 
 .primary-btn {
-  background: var(--accent);
-  color: white;
-  border: 1px solid var(--accent);
+  background: #ffffff;
+  color: #000;
+  border: 1px solid #000;
 }
 
 .primary-btn:hover {
-  background: #1d4ed8;
-  border-color: #1d4ed8;
+  background: #f1f5f9;
 }
 
 .secondary-btn {
@@ -269,7 +259,7 @@ button {
 }
 
 .secondary-btn:hover {
-  border-color: #cbd5e1;
+  border-color: #000;
   background: #f8fafc;
 }
 
@@ -299,24 +289,21 @@ button {
   flex-wrap: wrap;
   margin: 6px 0 8px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .crumb {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 10px;
-  background: var(--pill);
-  border-radius: 999px;
+  padding: 4px 0;
   cursor: pointer;
-  border: 1px solid transparent;
-  transition: border 0.2s ease, background 0.2s ease;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.2s ease;
 }
 
 .crumb:hover {
-  border-color: #cbd5e1;
-  background: #e5e7eb;
+  border-color: #000;
 }
 
 .crumb-divider {
@@ -330,7 +317,7 @@ button {
   width: 360px;
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 0;
   z-index: 10;
   overflow: hidden;
   display: flex;
@@ -345,7 +332,7 @@ button {
   align-items: center;
   justify-content: space-between;
   padding: 12px 14px;
-  background: #f8fafc;
+  background: #ffffff;
   border-bottom: 1px solid var(--border);
   cursor: move;
 }
@@ -373,21 +360,14 @@ button {
 }
 
 .badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--muted);
-  background: var(--pill);
-  padding: 6px 10px;
-  border-radius: 999px;
+  display: none;
 }
 
 .selection-note {
   background: rgba(37, 99, 235, 0.08);
   border: 1px dashed rgba(37, 99, 235, 0.35);
   padding: 10px;
-  border-radius: 10px;
+  border-radius: 0;
   color: var(--text);
   margin-bottom: 10px;
 }
@@ -409,13 +389,5 @@ button {
 }
 
 .timeline-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: var(--pill);
-  border: 1px solid var(--border);
-  font-size: 12px;
-  color: var(--text);
+  display: none;
 }
