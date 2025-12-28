@@ -1,15 +1,15 @@
 :root {
-  --bg: #f7f8fb;
+  --bg: #f5f7fb;
   --card: #ffffff;
-  --panel: #f1f3f7;
-  --accent: #4b5563;
-  --accent-strong: #111827;
+  --panel: #eef1f6;
+  --accent: #2563eb;
+  --accent-strong: #1e3a8a;
   --text: #111827;
   --muted: #6b7280;
   --border: #e5e7eb;
-  --shadow: 0 14px 40px rgba(17, 24, 39, 0.08);
-  --shadow-strong: 0 18px 60px rgba(17, 24, 39, 0.12);
-  --pill: #eef1f7;
+  --shadow: none;
+  --shadow-strong: none;
+  --pill: #e7ecf5;
 }
 
 * {
@@ -19,9 +19,7 @@
 body {
   margin: 0;
   font-family: "Inter", system-ui, -apple-system, sans-serif;
-  background: radial-gradient(circle at 10% 20%, rgba(229, 231, 235, 0.6), transparent 24%),
-    radial-gradient(circle at 90% 10%, rgba(209, 213, 219, 0.48), transparent 24%),
-    var(--bg);
+  background: var(--bg);
   color: var(--text);
   min-height: 100vh;
   display: flex;
@@ -43,7 +41,6 @@ body {
   position: sticky;
   top: 0;
   height: 100vh;
-  box-shadow: inset -1px 0 0 var(--border);
 }
 
 
@@ -66,6 +63,10 @@ body {
   color: var(--muted);
   font-size: 13px;
   margin-bottom: 12px;
+}
+
+.sidebar-header .primary-btn {
+  margin-top: 4px;
 }
 
 .tree-list {
@@ -92,19 +93,18 @@ body {
   margin: 4px 0 8px;
   background: #fff;
   border: 1px solid var(--border);
-  box-shadow: 0 6px 18px rgba(17, 24, 39, 0.03);
-  transition: border 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+  transition: border 0.2s ease, background 0.2s ease;
   cursor: pointer;
 }
 
 .tree-node:hover {
   border-color: #cbd5e1;
-  box-shadow: 0 12px 26px rgba(17, 24, 39, 0.06);
+  background: #f8fafc;
 }
 
 .tree-node.active {
-  border: 1px solid #94a3b8;
-  box-shadow: 0 14px 32px rgba(17, 24, 39, 0.08);
+  border: 1px solid #2563eb;
+  background: #eef2ff;
 }
 
 .tree-node .title {
@@ -150,7 +150,6 @@ body {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 18px;
-  box-shadow: var(--shadow);
   overflow: hidden;
 }
 
@@ -160,7 +159,7 @@ body {
   justify-content: space-between;
   align-items: center;
   padding: 18px 20px;
-  background: linear-gradient(180deg, #f9fafb, #f2f4f7);
+  background: #f5f7fb;
   border-bottom: 1px solid var(--border);
 }
 
@@ -174,7 +173,7 @@ body {
   padding: 18px 20px 8px;
   height: 62vh;
   overflow-y: auto;
-  background: linear-gradient(#ffffff, #fbfcfd);
+  background: #ffffff;
 }
 
 .message {
@@ -182,13 +181,12 @@ body {
   padding: 12px 14px;
   border-radius: 14px;
   border: 1px solid var(--border);
-  background: #f9fafb;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  background: #f7f9fb;
 }
 
 .message.user {
-  background: #eef1f7;
-  border-color: #dbe1ea;
+  background: #e9f2ff;
+  border-color: #cbdffb;
 }
 
 .message .role {
@@ -208,7 +206,7 @@ body {
 .composer {
   border-top: 1px solid var(--border);
   padding: 12px 14px 16px;
-  background: #f7f8fb;
+  background: #f5f7fb;
 }
 
 
@@ -226,7 +224,6 @@ textarea {
   color: var(--text);
   resize: vertical;
   min-height: 68px;
-  box-shadow: 0 6px 14px rgba(17, 24, 39, 0.05);
 }
 
 textarea:focus {
@@ -239,12 +236,18 @@ button {
   border-radius: 12px;
   cursor: pointer;
   font-weight: 600;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
 }
 
 .primary-btn {
-  background: linear-gradient(135deg, #111827, #4b5563);
+  background: var(--accent);
   color: white;
-  box-shadow: 0 10px 24px rgba(17, 24, 39, 0.22);
+  border: 1px solid var(--accent);
+}
+
+.primary-btn:hover {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
 }
 
 .secondary-btn {
@@ -253,11 +256,20 @@ button {
   border: 1px solid var(--border);
 }
 
+.secondary-btn:hover {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
 .ghost-btn {
   background: transparent;
   color: var(--accent-strong);
   border: 1px solid transparent;
   padding-inline: 10px;
+}
+
+.full-width {
+  width: 100%;
 }
 
 .meta-row {
@@ -307,7 +319,6 @@ button {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 14px;
-  box-shadow: var(--shadow-strong);
   z-index: 10;
   overflow: hidden;
 }

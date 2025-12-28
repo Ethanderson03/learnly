@@ -51,7 +51,7 @@
         return trimmed.join(" \n ");
       };
 
-      function Sidebar({ tree, activeId, onSelect }) {
+      function Sidebar({ tree, activeId, onSelect, onNewChat }) {
         const renderNode = (node, depth = 0) => (
           <li key={node.id}>
             <div className={`tree-branch depth-${depth}`}>
@@ -85,6 +85,9 @@
               <p className="hint">
                 Highlight any reply and click <strong>Fork selection</strong> to spawn a detachable side chat. Each fork keeps the parent context.
               </p>
+              <button className="primary-btn full-width" onClick={onNewChat}>
+                + New chat
+              </button>
             </div>
             <ul className="tree-list">{renderNode(tree)}</ul>
           </aside>
@@ -329,6 +332,24 @@
           }));
         };
 
+        const handleNewChat = () => {
+          const id = `chat-${Date.now()}-${Math.round(Math.random() * 9999)}`;
+          const siblingCount = Object.values(nodes).filter((n) => n.parentId === "root").length;
+          const newNode = createNode({
+            id,
+            parentId: "root",
+            title: `New chat ${siblingCount + 1}`,
+            messages: [{ role: "assistant", text: "New chat started. Ask anything to kick off this branch." }],
+          });
+
+          setNodes((prev) => ({ ...prev, [id]: newNode }));
+          setActiveId(id);
+          setPositions((prev) => ({
+            ...prev,
+            [id]: { x: 520 + Object.keys(prev).length * 22, y: 160 + Object.keys(prev).length * 18 },
+          }));
+        };
+
         const handleClose = (id) => {
           const node = nodes[id];
           const summary = summarizeMessages(node.messages);
@@ -390,7 +411,7 @@
 
         return (
           <div className="app-shell">
-            <Sidebar tree={tree} activeId={activeId} onSelect={selectNode} />
+            <Sidebar tree={tree} activeId={activeId} onSelect={selectNode} onNewChat={handleNewChat} />
             <main className="main">
               <ChatPanel
                 node={nodesById[activeId] || nodesById.root}
