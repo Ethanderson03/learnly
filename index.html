@@ -28,13 +28,52 @@
       const NODE_HEIGHT = 70;
       const HORIZONTAL_GAP = 50;
       const VERTICAL_GAP = 80;
+      const API_ENDPOINT = "/api/chat";
+      const STORAGE_KEY_API = "learnly_api_key";
+      const STORAGE_KEY_MODEL = "learnly_model";
+
+      const MODELS = [
+        { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4", description: "Best balance of speed and intelligence" },
+        { id: "claude-3-5-sonnet-20241022", name: "Claude 3.5 Sonnet", description: "Fast and capable" },
+        { id: "claude-3-5-haiku-20241022", name: "Claude 3.5 Haiku", description: "Fastest, great for quick responses" },
+      ];
 
       const initialRootMessages = [
         {
           role: "assistant",
-          text: "Welcome to Learnly. Ask any question to begin exploring. Fork conversations to dig deeper into specific concepts. Mark messages as 'foundations' when you understand them.",
+          text: "Welcome to Learnly. Ask any question to begin exploring. Fork conversations to dig deeper into specific concepts. Mark messages as 'foundations' when you understand them.\n\nClick the ⚙ button in the sidebar to add your Anthropic API key.",
         },
       ];
+
+      // ============================================
+      // API HELPER
+      // ============================================
+      const sendToClaudeAPI = async (messages, apiKey, model, systemPrompt) => {
+        const response = await fetch(API_ENDPOINT, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-API-Key": apiKey,
+          },
+          body: JSON.stringify({
+            messages: messages.map(m => ({
+              role: m.role === "user" ? "user" : "assistant",
+              content: m.text
+            })).filter(m => m.role === "user" || m.role === "assistant"),
+            system: systemPrompt,
+            model: model,
+            max_tokens: 2048,
+          }),
+        });
+
+        const data = await response.json();
+
+        if (!data.success) {
+          throw new Error(data.error || "API request failed");
+        }
+
+        return data.message;
+      };
 
       // ============================================
       // DATA MODELS
@@ -239,7 +278,7 @@
       // ============================================
       // UI COMPONENTS - Sidebar
       // ============================================
-      function Sidebar({ trees, activeId, onSelect, onNewChat, currentDepth, maxDepth, onJumpTo }) {
+      function Sidebar({ trees, activeId, onSelect, onNewChat, currentDepth, maxDepth, onJumpTo, onOpenSettings, hasApiKey }) {
         const renderNode = (node, depth = 0) => (
           <li key={node.id}>
             <div className="tree-branch">
@@ -268,8 +307,22 @@
         return (
           <aside className="sidebar">
             <div className="sidebar-header">
-              <h1>Learnly</h1>
+              <div className="sidebar-title-row">
+                <h1>Learnly</h1>
+                <button
+                  className={`settings-btn ${hasApiKey ? 'has-key' : ''}`}
+                  onClick={onOpenSettings}
+                  title="Settings"
+                >
+                  ⚙
+                </button>
+              </div>
               <p className="hint">Visual learning through branching exploration</p>
+              {!hasApiKey && (
+                <div className="api-warning" onClick={onOpenSettings}>
+                  ⚠ Add API key to enable AI
+                </div>
+              )}
               <button className="primary-btn full-width" onClick={onNewChat}>
                 + New Thread
               </button>
@@ -549,6 +602,7 @@
         onCloseWithMerge,
         lineage,
         onJump,
+        isLoading,
       }) {
         if (!node) return null;
 
@@ -592,6 +646,7 @@
             <Composer
               onSend={(text) => onSend(node.id, text)}
               onFork={(text) => onFork(node.id, text)}
+              disabled={isLoading}
               compact
             />
           </div>
@@ -650,6 +705,88 @@
       }
 
       // ============================================
+      // UI COMPONENTS - Settings Modal
+      // ============================================
+      function SettingsModal({ apiKey, setApiKey, model, setModel, onClose }) {
+        const [tempKey, setTempKey] = useState(apiKey);
+        const [tempModel, setTempModel] = useState(model);
+
+        const handleSave = () => {
+          setApiKey(tempKey);
+          setModel(tempModel);
+          localStorage.setItem(STORAGE_KEY_API, tempKey);
+          localStorage.setItem(STORAGE_KEY_MODEL, tempModel);
+          onClose();
+        };
+
+        const handleClear = () => {
+          setTempKey("");
+          setApiKey("");
+          localStorage.removeItem(STORAGE_KEY_API);
+        };
+
+        return (
+          <div className="merge-preview-overlay" onClick={onClose}>
+            <div className="merge-preview-modal settings-modal" onClick={e => e.stopPropagation()}>
+              <div className="merge-header">
+                <span className="ascii-arrow">⚙</span>
+                Settings
+              </div>
+
+              <div className="merge-content">
+                <div className="section">
+                  <h4>Anthropic API Key</h4>
+                  <p className="settings-hint">Get your API key from console.anthropic.com</p>
+                  <input
+                    type="password"
+                    className="settings-input"
+                    placeholder="sk-ant-..."
+                    value={tempKey}
+                    onChange={(e) => setTempKey(e.target.value)}
+                  />
+                  {tempKey && (
+                    <button className="ghost-btn" onClick={handleClear} style={{marginTop: 8}}>
+                      Clear key
+                    </button>
+                  )}
+                </div>
+
+                <div className="section">
+                  <h4>Model</h4>
+                  <div className="model-options">
+                    {MODELS.map(m => (
+                      <label key={m.id} className={`model-option ${tempModel === m.id ? 'selected' : ''}`}>
+                        <input
+                          type="radio"
+                          name="model"
+                          value={m.id}
+                          checked={tempModel === m.id}
+                          onChange={() => setTempModel(m.id)}
+                        />
+                        <div className="model-info">
+                          <span className="model-name">{m.name}</span>
+                          <span className="model-desc">{m.description}</span>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="merge-actions">
+                <button className="secondary-btn" onClick={onClose}>
+                  Cancel
+                </button>
+                <button className="primary-btn" onClick={handleSave}>
+                  Save Settings
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      // ============================================
       // MAIN APP
       // ============================================
       function App() {
@@ -665,6 +802,13 @@
         const [showPanel, setShowPanel] = useState(false);
         const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
         const [mergePreview, setMergePreview] = useState(null);
+
+        // API and settings state
+        const [apiKey, setApiKey] = useState(() => localStorage.getItem(STORAGE_KEY_API) || "");
+        const [model, setModel] = useState(() => localStorage.getItem(STORAGE_KEY_MODEL) || MODELS[0].id);
+        const [showSettings, setShowSettings] = useState(false);
+        const [isLoading, setIsLoading] = useState(false);
+        const [error, setError] = useState(null);
 
         // Build enriched tree (supports multiple top-level threads)
         const trees = useMemo(() => {
@@ -788,11 +932,56 @@
           return `Building on ${parent.title}'s context. ${context ? `Considering: "${context.slice(0, 100)}..."` : ''} Here's a thoughtful exploration of "${question}".`;
         };
 
-        const handleSend = (id, text) => {
-          addMessages(id, [
-            { role: "user", text },
-            { role: "assistant", text: simulateAssistant(text, id) },
-          ]);
+        const handleSend = async (id, text) => {
+          // Add user message immediately
+          addMessages(id, [{ role: "user", text }]);
+
+          if (!apiKey) {
+            addMessages(id, [{
+              role: "assistant",
+              text: "Please add your Anthropic API key in Settings (⚙) to get AI responses."
+            }]);
+            setShowSettings(true);
+            return;
+          }
+
+          setIsLoading(true);
+          setError(null);
+
+          try {
+            const node = nodes[id];
+            const conversationHistory = [...node.messages, { role: "user", text }];
+
+            // Build system prompt with context about the conversation
+            const systemPrompt = `You are a helpful learning assistant in Learnly, a tool for deep exploration of topics through branching conversations.
+
+Your role is to:
+- Help the user understand concepts deeply by breaking them down
+- Ask clarifying questions to identify gaps in understanding
+- Build on what the user already knows
+- Encourage exploration through follow-up questions
+- Be concise but thorough
+
+This conversation is titled "${node.title}". Help the user explore and learn.`;
+
+            const response = await sendToClaudeAPI(
+              conversationHistory,
+              apiKey,
+              model,
+              systemPrompt
+            );
+
+            addMessages(id, [{ role: "assistant", text: response }]);
+          } catch (err) {
+            console.error("API Error:", err);
+            setError(err.message);
+            addMessages(id, [{
+              role: "assistant",
+              text: `Error: ${err.message}\n\nPlease check your API key in Settings.`
+            }]);
+          } finally {
+            setIsLoading(false);
+          }
         };
 
         const makeTitle = (parentTitle, selection) => {
@@ -927,6 +1116,8 @@
               currentDepth={currentDepth}
               maxDepth={maxDepth}
               onJumpTo={selectNode}
+              onOpenSettings={() => setShowSettings(true)}
+              hasApiKey={!!apiKey}
             />
 
             <div className="main-area">
@@ -950,6 +1141,7 @@
                   onCloseWithMerge={handleCloseWithMerge}
                   lineage={lineage}
                   onJump={selectNode}
+                  isLoading={isLoading}
                 />
               )}
             </div>
@@ -960,6 +1152,16 @@
                 targetNode={nodes[mergePreview.targetId]}
                 onConfirm={confirmMerge}
                 onCancel={() => setMergePreview(null)}
+              />
+            )}
+
+            {showSettings && (
+              <SettingsModal
+                apiKey={apiKey}
+                setApiKey={setApiKey}
+                model={model}
+                setModel={setModel}
+                onClose={() => setShowSettings(false)}
               />
             )}
           </div>

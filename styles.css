@@ -1074,3 +1074,144 @@ button:hover {
 .status-dot.needs-review {
   background: var(--accent-needs-review);
 }
+
+/* ============================================
+   SETTINGS MODAL
+   ============================================ */
+.sidebar-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.settings-btn {
+  background: transparent;
+  border: 1px solid var(--border-dim);
+  color: var(--text-muted);
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  font-size: var(--font-size-base);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.settings-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-medium);
+  color: var(--text-primary);
+}
+
+.settings-btn.has-key {
+  border-color: var(--accent-grounded);
+  color: var(--accent-grounded);
+}
+
+.api-warning {
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid var(--accent-needs-review);
+  color: var(--accent-needs-review);
+  padding: 8px 10px;
+  font-size: var(--font-size-xs);
+  margin-bottom: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.api-warning:hover {
+  background: rgba(251, 191, 36, 0.15);
+}
+
+.settings-modal {
+  width: 420px;
+}
+
+.settings-hint {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  margin: 0 0 10px;
+}
+
+.settings-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border-medium);
+  background: var(--bg-main);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-base);
+  transition: border-color 0.15s ease;
+}
+
+.settings-input:focus {
+  outline: none;
+  border-color: var(--accent-exploring);
+  box-shadow: var(--glow-primary);
+}
+
+.settings-input::placeholder {
+  color: var(--text-muted);
+}
+
+.model-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.model-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-dim);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.model-option:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-medium);
+}
+
+.model-option.selected {
+  border-color: var(--accent-exploring);
+  background: var(--bg-hover);
+}
+
+.model-option input[type="radio"] {
+  margin-top: 2px;
+  accent-color: var(--accent-exploring);
+}
+
+.model-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.model-name {
+  font-weight: 500;
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.model-desc {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+/* Loading state for buttons */
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+textarea:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
