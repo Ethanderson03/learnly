@@ -286,11 +286,12 @@
         return { cleanText, suggestions };
       };
 
-      // Mermaid Diagram Component with clickable nodes
+      // Mermaid Diagram Component with clickable nodes and lightbox
       function MermaidDiagram({ chart, id, onNodeClick }) {
         const containerRef = useRef(null);
         const [svg, setSvg] = useState('');
         const [error, setError] = useState(null);
+        const [showLightbox, setShowLightbox] = useState(false);
 
         useEffect(() => {
           const renderChart = async () => {
@@ -361,11 +362,32 @@
         }
 
         return (
-          <div
-            ref={containerRef}
-            className="mermaid-diagram"
-            dangerouslySetInnerHTML={{ __html: svg }}
-          />
+          <>
+            <div
+              ref={containerRef}
+              className="mermaid-diagram"
+              dangerouslySetInnerHTML={{ __html: svg }}
+            />
+            <button
+              className="mermaid-expand-btn"
+              onClick={() => setShowLightbox(true)}
+              title="View fullscreen"
+            >
+              ⛶ Expand
+            </button>
+
+            {showLightbox && (
+              <div className="lightbox-overlay" onClick={() => setShowLightbox(false)}>
+                <div className="lightbox-content" onClick={(e) => e.stopPropagation()}>
+                  <button className="lightbox-close" onClick={() => setShowLightbox(false)}>✕</button>
+                  <div
+                    className="lightbox-diagram"
+                    dangerouslySetInnerHTML={{ __html: svg }}
+                  />
+                </div>
+              </div>
+            )}
+          </>
         );
       }
 
@@ -959,49 +981,55 @@
           </li>
         );
 
+        if (collapsed) {
+          return (
+            <button
+              className="sidebar-expand-float"
+              onClick={onToggleCollapse}
+              title="Show sidebar"
+            >
+              ☰ Menu
+            </button>
+          );
+        }
+
         return (
-          <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
+          <aside className="sidebar">
             <div className="sidebar-header">
               <button
                 className="collapse-btn"
                 onClick={onToggleCollapse}
-                title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+                title="Collapse sidebar"
               >
-                {collapsed ? '»' : '«'}
+                «
               </button>
-              {!collapsed && (
-                <>
-                  <div className="sidebar-title-row">
-                    <h1>Learnly</h1>
-                    <button
-                      className={`settings-btn ${hasApiKey ? 'has-key' : ''}`}
-                      onClick={onOpenSettings}
-                      title="Settings"
-                    >
-                      ⚙
-                    </button>
-                  </div>
-                  <p className="hint">Visual learning through branching exploration</p>
-                  {!hasApiKey && (
-                    <div className="api-warning" onClick={onOpenSettings}>
-                      ⚠ Add API key to enable AI
-                    </div>
-                  )}
-                  <button className="primary-btn full-width" onClick={onNewChat}>
-                    + New Thread
-                  </button>
-                </>
-              )}
-            </div>
-            {!collapsed && <DepthMeter currentDepth={currentDepth} maxDepth={maxDepth} />}
-            {!collapsed && <FoundationMap trees={trees} onJumpTo={onJumpTo} />}
-            {!collapsed && (
-              <div className="tree-list-container">
-                <ul className="tree-list">
-                  {trees.map(t => renderNode(t, 0))}
-                </ul>
+              <div className="sidebar-title-row">
+                <h1>Learnly</h1>
+                <button
+                  className={`settings-btn ${hasApiKey ? 'has-key' : ''}`}
+                  onClick={onOpenSettings}
+                  title="Settings"
+                >
+                  ⚙
+                </button>
               </div>
-            )}
+              <p className="hint">Visual learning through branching exploration</p>
+              {!hasApiKey && (
+                <div className="api-warning" onClick={onOpenSettings}>
+                  ⚠ Add API key to enable AI
+                </div>
+              )}
+              <button className="primary-btn full-width" onClick={onNewChat}>
+                + New Thread
+              </button>
+            </div>
+            <DepthMeter currentDepth={currentDepth} maxDepth={maxDepth} />
+            <FoundationMap trees={trees} onJumpTo={onJumpTo} />
+            <div className="tree-list-container">
+              <ul className="tree-list">
+                {trees.map(t => renderNode(t, 0))}
+              </ul>
+            </div>
           </aside>
         );
       }
