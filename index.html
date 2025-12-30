@@ -88,6 +88,7 @@
         health = "exploring",
         foundationMarkers = [],
         mergeHistory = [],
+        expertiseLevel = null, // null = not set, 1-5 scale (novice to expert)
       }) => ({
         id,
         parentId,
@@ -98,6 +99,7 @@
         health,
         foundationMarkers,
         mergeHistory,
+        expertiseLevel,
       });
 
       const selectionText = () => {
@@ -149,6 +151,101 @@
         if (ratio >= 0.4) return 'grounded';
         if (ratio >= 0.15) return 'exploring';
         return 'needs-review';
+      };
+
+      // Parse AI response to extract suggestions and clean text
+      const parseAIResponse = (text) => {
+        const suggestionsMatch = text.match(/```suggestions\s*([\s\S]*?)```/);
+        let suggestions = { branches: [], quick_answers: [] };
+        let cleanText = text;
+
+        if (suggestionsMatch) {
+          try {
+            const parsed = JSON.parse(suggestionsMatch[1].trim());
+            suggestions = {
+              branches: parsed.branches || [],
+              quick_answers: parsed.quick_answers || parsed.questions || [] // support both
+            };
+            cleanText = text.replace(/```suggestions\s*[\s\S]*?```/, '').trim();
+          } catch (e) {
+            console.warn('Failed to parse suggestions:', e);
+          }
+        }
+
+        return { cleanText, suggestions };
+      };
+
+      // Simple markdown renderer
+      const renderMarkdown = (text) => {
+        if (!text) return null;
+
+        // Split into lines and process
+        const lines = text.split('\n');
+        const elements = [];
+        let listItems = [];
+        let inList = false;
+
+        const processInline = (line) => {
+          // Bold: **text** or __text__
+          line = line.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+          line = line.replace(/__(.+?)__/g, '<strong>$1</strong>');
+          // Italic: *text* or _text_
+          line = line.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+          line = line.replace(/_([^_]+)_/g, '<em>$1</em>');
+          // Code: `text`
+          line = line.replace(/`([^`]+)`/g, '<code>$1</code>');
+          return line;
+        };
+
+        lines.forEach((line, idx) => {
+          const trimmed = line.trim();
+
+          // Bullet list item
+          if (trimmed.match(/^[-*•]\s+/)) {
+            const content = trimmed.replace(/^[-*•]\s+/, '');
+            listItems.push(content);
+            inList = true;
+          } else {
+            // Flush list if we were in one
+            if (inList && listItems.length > 0) {
+              elements.push(
+                <ul key={`list-${idx}`} className="md-list">
+                  {listItems.map((item, i) => (
+                    <li key={i} dangerouslySetInnerHTML={{ __html: processInline(item) }} />
+                  ))}
+                </ul>
+              );
+              listItems = [];
+              inList = false;
+            }
+
+            // Headers
+            if (trimmed.startsWith('### ')) {
+              elements.push(<h4 key={idx} className="md-h4">{trimmed.slice(4)}</h4>);
+            } else if (trimmed.startsWith('## ')) {
+              elements.push(<h3 key={idx} className="md-h3">{trimmed.slice(3)}</h3>);
+            } else if (trimmed.startsWith('# ')) {
+              elements.push(<h2 key={idx} className="md-h2">{trimmed.slice(2)}</h2>);
+            } else if (trimmed) {
+              elements.push(
+                <p key={idx} dangerouslySetInnerHTML={{ __html: processInline(trimmed) }} />
+              );
+            }
+          }
+        });
+
+        // Flush any remaining list
+        if (listItems.length > 0) {
+          elements.push(
+            <ul key="list-final" className="md-list">
+              {listItems.map((item, i) => (
+                <li key={i} dangerouslySetInnerHTML={{ __html: processInline(item) }} />
+              ))}
+            </ul>
+          );
+        }
+
+        return elements;
       };
 
       // ============================================
@@ -341,7 +438,7 @@
       // ============================================
       // UI COMPONENTS - Message List
       // ============================================
-      function MessageList({ messages, foundationMarkers = [], onToggleFoundation, nodeId }) {
+      function MessageList({ messages, foundationMarkers = [], onToggleFoundation, nodeId, onFork, onQuickReply }) {
         const contentMessages = messages.filter(m => m.role !== 'system');
 
         if (!messages.length) {
@@ -352,6 +449,7 @@
           const contentIndex = contentMessages.indexOf(msg);
           const isFoundation = foundationMarkers.includes(contentIndex);
           const isMerged = msg.mergedFrom || msg.origin;
+          const hasSuggestions = msg.suggestions && (msg.suggestions.branches?.length > 0 || msg.suggestions.quick_answers?.length > 0);
 
           return (
             <div
@@ -371,16 +469,96 @@
                   {isFoundation ? '★' : '☆'}
                 </button>
               )}
-              <p>{msg.text}</p>
+              <div className="message-content">
+                {msg.role === 'assistant' ? renderMarkdown(msg.text) : <p>{msg.text}</p>}
+              </div>
+
+              {hasSuggestions && (
+                <div className="suggestions-container">
+                  {msg.suggestions.branches?.length > 0 && (
+                    <div className="branch-suggestions">
+                      <div className="suggestions-label">Explore deeper:</div>
+                      <div className="suggestion-chips">
+                        {msg.suggestions.branches.map((branch, i) => (
+                          <button
+                            key={i}
+                            className="suggestion-chip branch-chip"
+                            onClick={() => onFork(branch)}
+                            title={`Fork into: ${branch}`}
+                          >
+                            <span className="chip-icon">↳</span>
+                            {branch}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {msg.suggestions.quick_answers?.length > 0 && (
+                    <div className="quick-replies">
+                      <div className="suggestions-label">Quick reply:</div>
+                      <div className="suggestion-chips">
+                        {msg.suggestions.quick_answers.map((answer, i) => (
+                          <button
+                            key={i}
+                            className="suggestion-chip answer-chip"
+                            onClick={() => onQuickReply(answer)}
+                            title={`Reply: ${answer}`}
+                          >
+                            {answer}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           );
         });
       }
 
       // ============================================
+      // UI COMPONENTS - Expertise Selector
+      // ============================================
+      function ExpertiseSelector({ onSelect, currentLevel }) {
+        const levels = [
+          { value: 1, label: 'Novice', desc: 'New to this topic' },
+          { value: 2, label: 'Beginner', desc: 'Know the basics' },
+          { value: 3, label: 'Intermediate', desc: 'Some experience' },
+          { value: 4, label: 'Advanced', desc: 'Solid understanding' },
+          { value: 5, label: 'Expert', desc: 'Deep expertise' },
+        ];
+
+        return (
+          <div className="expertise-selector">
+            <div className="expertise-header">
+              <span className="expertise-icon">📊</span>
+              What's your familiarity with this topic?
+            </div>
+            <div className="expertise-levels">
+              {levels.map((level) => (
+                <button
+                  key={level.value}
+                  className={`expertise-btn ${currentLevel === level.value ? 'selected' : ''}`}
+                  onClick={() => onSelect(level.value)}
+                  title={level.desc}
+                >
+                  <span className="level-label">{level.label}</span>
+                </button>
+              ))}
+            </div>
+            <div className="expertise-hint">
+              This helps tailor explanations to your level
+            </div>
+          </div>
+        );
+      }
+
+      // ============================================
       // UI COMPONENTS - Composer
       // ============================================
-      function Composer({ onSend, disabled, onFork, compact = false }) {
+      function Composer({ onSend, disabled, onFork, compact = false, showExpertise, expertiseLevel, onSetExpertise }) {
         const [input, setInput] = useState("");
 
         const handleSubmit = (e) => {
@@ -390,6 +568,17 @@
           setInput("");
         };
 
+        const handleKeyDown = (e) => {
+          // CMD+Enter (Mac) or Ctrl+Enter (Windows) to send
+          if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+            e.preventDefault();
+            if (input.trim() && !disabled) {
+              onSend(input.trim());
+              setInput("");
+            }
+          }
+        };
+
         const handleFork = () => {
           const text = selectionText();
           onFork(text);
@@ -397,11 +586,17 @@
 
         return (
           <div className="composer">
+            {showExpertise && !expertiseLevel && (
+              <div className="composer-expertise">
+                <ExpertiseSelector onSelect={onSetExpertise} currentLevel={expertiseLevel} />
+              </div>
+            )}
             <form onSubmit={handleSubmit}>
               <textarea
-                placeholder="Ask or explore something..."
+                placeholder={showExpertise && !expertiseLevel ? "Select your experience level above, then ask your question..." : "Ask or explore something..."}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
                 disabled={disabled}
               ></textarea>
               <button type="submit" className="primary-btn" disabled={disabled}>
@@ -411,7 +606,7 @@
                 Fork
               </button>
             </form>
-            {!compact && <div className="footer-hint">Highlight text → Fork to explore deeper</div>}
+            {!compact && <div className="footer-hint">⌘+Enter to send • Highlight text → Fork to explore deeper</div>}
           </div>
         );
       }
@@ -603,11 +798,48 @@
         lineage,
         onJump,
         isLoading,
+        onSetExpertise,
       }) {
+        const [width, setWidth] = useState(380);
+        const [isResizing, setIsResizing] = useState(false);
+        const panelRef = useRef(null);
+
+        const handleMouseDown = (e) => {
+          e.preventDefault();
+          setIsResizing(true);
+        };
+
+        useEffect(() => {
+          const handleMouseMove = (e) => {
+            if (!isResizing) return;
+            const newWidth = window.innerWidth - e.clientX;
+            setWidth(Math.max(280, Math.min(newWidth, window.innerWidth * 0.7)));
+          };
+
+          const handleMouseUp = () => {
+            setIsResizing(false);
+          };
+
+          if (isResizing) {
+            document.addEventListener('mousemove', handleMouseMove);
+            document.addEventListener('mouseup', handleMouseUp);
+            document.body.style.cursor = 'ew-resize';
+            document.body.style.userSelect = 'none';
+          }
+
+          return () => {
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', handleMouseUp);
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+          };
+        }, [isResizing]);
+
         if (!node) return null;
 
         return (
-          <div className="node-panel">
+          <div className="node-panel" ref={panelRef} style={{ width: `${width}px` }}>
+            <div className="panel-resize-handle" onMouseDown={handleMouseDown} />
             <div className="panel-header">
               <div>
                 <h2 className="panel-title">{node.title}</h2>
@@ -641,13 +873,26 @@
                 foundationMarkers={node.foundationMarkers || []}
                 onToggleFoundation={onToggleFoundation}
                 nodeId={node.id}
+                onFork={(topic) => onFork(node.id, topic)}
+                onQuickReply={(text) => onSend(node.id, text)}
               />
+              {isLoading && (
+                <div className="message assistant loading">
+                  <div className="role">ASSISTANT</div>
+                  <p className="thinking-indicator">
+                    <span className="thinking-dots">thinking</span>
+                  </p>
+                </div>
+              )}
             </div>
             <Composer
               onSend={(text) => onSend(node.id, text)}
               onFork={(text) => onFork(node.id, text)}
               disabled={isLoading}
               compact
+              showExpertise={node.parentId === null && node.messages.filter(m => m.role === 'user').length === 0}
+              expertiseLevel={node.expertiseLevel}
+              onSetExpertise={(level) => onSetExpertise(node.id, level)}
             />
           </div>
         );
@@ -953,16 +1198,53 @@
             const conversationHistory = [...node.messages, { role: "user", text }];
 
             // Build system prompt with context about the conversation
-            const systemPrompt = `You are a helpful learning assistant in Learnly, a tool for deep exploration of topics through branching conversations.
+            const depth = nodesById[id]?.depth || 0;
+            const expertiseLevel = node.expertiseLevel;
+            const isFirstMessage = node.messages.filter(m => m.role === 'user').length === 0;
+            const isTopLevel = node.parentId === null;
 
-Your role is to:
-- Help the user understand concepts deeply by breaking them down
-- Ask clarifying questions to identify gaps in understanding
-- Build on what the user already knows
-- Encourage exploration through follow-up questions
-- Be concise but thorough
+            const expertiseContext = expertiseLevel
+              ? `The user has indicated they are at expertise level ${expertiseLevel}/5 (1=complete novice, 5=expert).`
+              : isTopLevel && isFirstMessage
+                ? `This is the start of a new topic. Gauge their familiarity level before diving deep.`
+                : '';
 
-This conversation is titled "${node.title}". Help the user explore and learn.`;
+            const depthContext = depth > 0
+              ? `Current exploration depth: ${depth}. The user has branched ${depth} level(s) deep into subtopics.`
+              : '';
+
+            const systemPrompt = `You are a thoughtful tutor in Learnly, helping users build deep understanding through the Socratic method and structured exploration.
+
+## Your Teaching Approach:
+1. **Assess first**: Before explaining, understand what the user already knows
+2. **Build foundations**: Ensure prerequisites are solid before advancing
+3. **Scaffold learning**: Break complex topics into digestible pieces
+4. **Check understanding**: Pause to verify comprehension before moving on
+5. **Encourage curiosity**: Highlight interesting tangents worth exploring
+
+${expertiseContext}
+${depthContext}
+
+## Response Style:
+- Be conversational but substantive
+- Use analogies and examples the user can relate to
+- Format with markdown: **bold** for key terms, bullet lists for concepts
+- Keep responses focused - don't overwhelm with too much at once
+
+## IMPORTANT - End every response with this JSON block:
+
+\`\`\`suggestions
+{
+  "branches": ["Subtopic 1", "Subtopic 2", "Subtopic 3"],
+  "quick_answers": ["I understand this", "Explain more simply", "Give me an example"]
+}
+\`\`\`
+
+- **branches**: 2-4 specific subtopics to explore deeper (become fork buttons)
+- **quick_answers**: 2-3 short responses the user can click to quickly reply (like "Yes, I know this", "Not sure, explain more", "Let's skip this"). These should be contextual to what you just asked or explained.
+
+Topic: "${node.title}"
+Help the user build genuine understanding.`;
 
             const response = await sendToClaudeAPI(
               conversationHistory,
@@ -971,7 +1253,13 @@ This conversation is titled "${node.title}". Help the user explore and learn.`;
               systemPrompt
             );
 
-            addMessages(id, [{ role: "assistant", text: response }]);
+            // Parse the response to extract suggestions
+            const { cleanText, suggestions } = parseAIResponse(response);
+            addMessages(id, [{
+              role: "assistant",
+              text: cleanText,
+              suggestions: suggestions
+            }]);
           } catch (err) {
             console.error("API Error:", err);
             setError(err.message);
@@ -1049,6 +1337,16 @@ This conversation is titled "${node.title}". Help the user explore and learn.`;
 
             return { ...prev, [nodeId]: updatedNode };
           });
+        };
+
+        const handleSetExpertise = (nodeId, level) => {
+          setNodes(prev => ({
+            ...prev,
+            [nodeId]: {
+              ...prev[nodeId],
+              expertiseLevel: level,
+            }
+          }));
         };
 
         const handleCloseWithMerge = (id) => {
@@ -1142,6 +1440,7 @@ This conversation is titled "${node.title}". Help the user explore and learn.`;
                   lineage={lineage}
                   onJump={selectNode}
                   isLoading={isLoading}
+                  onSetExpertise={handleSetExpertise}
                 />
               )}
             </div>
