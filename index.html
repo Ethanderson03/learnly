@@ -15,6 +15,7 @@
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   </head>
   <body>
     <div id="root"></div>
@@ -51,7 +52,7 @@
       // ============================================
       // CONSTANTS & UTILITIES
       // ============================================
-      const NODE_WIDTH = 200;
+      const NODE_WIDTH = 260;
       const NODE_HEIGHT = 70;
       const HORIZONTAL_GAP = 50;
       const VERTICAL_GAP = 80;
@@ -285,8 +286,8 @@
         return { cleanText, suggestions };
       };
 
-      // Mermaid Diagram Component
-      function MermaidDiagram({ chart, id }) {
+      // Mermaid Diagram Component with clickable nodes
+      function MermaidDiagram({ chart, id, onNodeClick }) {
         const containerRef = useRef(null);
         const [svg, setSvg] = useState('');
         const [error, setError] = useState(null);
@@ -309,6 +310,48 @@
           renderChart();
         }, [chart, id]);
 
+        // Add click handlers to nodes after SVG is rendered
+        useEffect(() => {
+          if (!svg || !containerRef.current || !onNodeClick) return;
+
+          const container = containerRef.current;
+
+          // Find all clickable nodes in the Mermaid SVG
+          const nodes = container.querySelectorAll('.node, .nodeLabel, .cluster-label, .edgeLabel');
+
+          nodes.forEach((node) => {
+            // Get the text content of the node
+            const textEl = node.querySelector('span, text, foreignObject') || node;
+            const text = textEl.textContent?.trim();
+
+            if (text && text.length > 1) {
+              node.style.cursor = 'pointer';
+              node.classList.add('clickable-node');
+
+              // Add click handler
+              const handleClick = (e) => {
+                e.stopPropagation();
+                onNodeClick(text);
+              };
+
+              node.addEventListener('click', handleClick);
+
+              // Store cleanup function
+              node._cleanupClick = () => node.removeEventListener('click', handleClick);
+            }
+          });
+
+          // Cleanup
+          return () => {
+            nodes.forEach((node) => {
+              if (node._cleanupClick) {
+                node._cleanupClick();
+                delete node._cleanupClick;
+              }
+            });
+          };
+        }, [svg, onNodeClick]);
+
         if (error) {
           return (
             <div className="mermaid-error">
@@ -326,32 +369,361 @@
         );
       }
 
-      // Simple markdown renderer with Mermaid support
-      const renderMarkdown = (text) => {
+      // ============================================
+      // Chart.js Component
+      // ============================================
+      function ChartDiagram({ config, id, onLabelClick }) {
+        const canvasRef = useRef(null);
+        const chartRef = useRef(null);
+        const [error, setError] = useState(null);
+
+        useEffect(() => {
+          if (!config || !canvasRef.current) return;
+
+          try {
+            const parsedConfig = typeof config === 'string' ? JSON.parse(config) : config;
+
+            // Destroy existing chart
+            if (chartRef.current) {
+              chartRef.current.destroy();
+            }
+
+            // Dark theme colors
+            const colors = [
+              'rgba(74, 158, 255, 0.8)',   // blue
+              'rgba(74, 222, 128, 0.8)',   // green
+              'rgba(251, 191, 36, 0.8)',   // yellow
+              'rgba(248, 113, 113, 0.8)',  // red
+              'rgba(167, 139, 250, 0.8)',  // purple
+              'rgba(34, 211, 238, 0.8)',   // cyan
+            ];
+
+            const borderColors = colors.map(c => c.replace('0.8', '1'));
+
+            // Apply colors to datasets
+            const datasets = (parsedConfig.datasets || []).map((ds, i) => ({
+              ...ds,
+              backgroundColor: ds.backgroundColor || colors[i % colors.length],
+              borderColor: ds.borderColor || borderColors[i % borderColors.length],
+              borderWidth: ds.borderWidth || 2,
+            }));
+
+            const chartConfig = {
+              type: parsedConfig.type || 'bar',
+              data: {
+                labels: parsedConfig.labels || [],
+                datasets: datasets,
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {
+                  title: {
+                    display: !!parsedConfig.title,
+                    text: parsedConfig.title || '',
+                    color: '#e8e8e8',
+                    font: { family: 'JetBrains Mono', size: 14 },
+                  },
+                  legend: {
+                    labels: { color: '#a0a0a0', font: { family: 'JetBrains Mono' } },
+                  },
+                },
+                scales: parsedConfig.type !== 'pie' && parsedConfig.type !== 'doughnut' ? {
+                  x: {
+                    ticks: { color: '#a0a0a0', font: { family: 'JetBrains Mono' } },
+                    grid: { color: '#2a2a2a' },
+                  },
+                  y: {
+                    ticks: { color: '#a0a0a0', font: { family: 'JetBrains Mono' } },
+                    grid: { color: '#2a2a2a' },
+                  },
+                } : undefined,
+                onClick: (event, elements) => {
+                  if (elements.length > 0 && onLabelClick) {
+                    const index = elements[0].index;
+                    const label = parsedConfig.labels[index];
+                    if (label) onLabelClick(label);
+                  }
+                },
+              },
+            };
+
+            chartRef.current = new Chart(canvasRef.current, chartConfig);
+            setError(null);
+          } catch (e) {
+            console.warn('Chart render error:', e);
+            setError(e.message);
+          }
+
+          return () => {
+            if (chartRef.current) {
+              chartRef.current.destroy();
+            }
+          };
+        }, [config, id]);
+
+        if (error) {
+          return (
+            <div className="chart-error">
+              <div className="error-label">Chart Error:</div>
+              <code>{error}</code>
+            </div>
+          );
+        }
+
+        return (
+          <div className="chart-container">
+            <canvas ref={canvasRef} />
+            <div className="chart-hint">Click any bar/segment to explore</div>
+          </div>
+        );
+      }
+
+      // ============================================
+      // Comparison Table Component
+      // ============================================
+      function ComparisonTable({ config, onCellClick }) {
+        const [sortCol, setSortCol] = useState(null);
+        const [sortDir, setSortDir] = useState('asc');
+
+        // Parse config safely
+        const { parsedConfig, parseError } = useMemo(() => {
+          try {
+            const parsed = typeof config === 'string' ? JSON.parse(config) : config;
+            return { parsedConfig: parsed, parseError: null };
+          } catch (e) {
+            return { parsedConfig: null, parseError: e.message };
+          }
+        }, [config]);
+
+        const { title = '', headers = [], rows = [], highlights = {} } = parsedConfig || {};
+
+        const sortedRows = useMemo(() => {
+          if (!rows || sortCol === null) return rows || [];
+          return [...rows].sort((a, b) => {
+            const valA = a[sortCol] || '';
+            const valB = b[sortCol] || '';
+            const cmp = valA.localeCompare(valB);
+            return sortDir === 'asc' ? cmp : -cmp;
+          });
+        }, [rows, sortCol, sortDir]);
+
+        if (parseError) {
+          return (
+            <div className="comparison-error">
+              <div className="error-label">Table Error:</div>
+              <code>{parseError}</code>
+            </div>
+          );
+        }
+
+        const handleHeaderClick = (colIdx) => {
+          if (sortCol === colIdx) {
+            setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
+          } else {
+            setSortCol(colIdx);
+            setSortDir('asc');
+          }
+        };
+
+        const getCellClass = (rowIdx, colIdx) => {
+          const key = `${rowIdx},${colIdx}`;
+          const highlight = highlights[key];
+          if (highlight === 'pro') return 'cell-pro';
+          if (highlight === 'con') return 'cell-con';
+          if (highlight === 'neutral') return 'cell-neutral';
+          return '';
+        };
+
+        return (
+          <div className="comparison-table-container">
+            {title && <div className="comparison-title">{title}</div>}
+            <table className="comparison-table">
+              <thead>
+                <tr>
+                  {headers.map((header, idx) => (
+                    <th
+                      key={idx}
+                      onClick={() => handleHeaderClick(idx)}
+                      className={sortCol === idx ? `sorted-${sortDir}` : ''}
+                    >
+                      {header}
+                      {sortCol === idx && (sortDir === 'asc' ? ' ↑' : ' ↓')}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {sortedRows.map((row, rowIdx) => (
+                  <tr key={rowIdx}>
+                    {row.map((cell, colIdx) => (
+                      <td
+                        key={colIdx}
+                        className={getCellClass(rowIdx, colIdx)}
+                        onClick={() => onCellClick && onCellClick(cell)}
+                        title="Click to explore"
+                      >
+                        {cell}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="comparison-hint">Click headers to sort • Click cells to explore</div>
+          </div>
+        );
+      }
+
+      // ============================================
+      // Flashcard Deck Component
+      // ============================================
+      function FlashcardDeck({ config, onTermClick }) {
+        const [currentIndex, setCurrentIndex] = useState(0);
+        const [isFlipped, setIsFlipped] = useState(false);
+        const [knownCount, setKnownCount] = useState(0);
+        const [reviewCount, setReviewCount] = useState(0);
+
+        let parsedConfig;
+        try {
+          parsedConfig = typeof config === 'string' ? JSON.parse(config) : config;
+        } catch (e) {
+          return (
+            <div className="flashcard-error">
+              <div className="error-label">Flashcard Error:</div>
+              <code>{e.message}</code>
+            </div>
+          );
+        }
+
+        const { title, cards = [] } = parsedConfig;
+        const currentCard = cards[currentIndex];
+
+        const handleFlip = () => setIsFlipped(!isFlipped);
+
+        const handleNext = () => {
+          setIsFlipped(false);
+          setCurrentIndex((prev) => (prev + 1) % cards.length);
+        };
+
+        const handlePrev = () => {
+          setIsFlipped(false);
+          setCurrentIndex((prev) => (prev - 1 + cards.length) % cards.length);
+        };
+
+        const handleKnew = () => {
+          setKnownCount((prev) => prev + 1);
+          handleNext();
+        };
+
+        const handleNeedReview = () => {
+          setReviewCount((prev) => prev + 1);
+          handleNext();
+        };
+
+        const handleShuffle = () => {
+          setCurrentIndex(Math.floor(Math.random() * cards.length));
+          setIsFlipped(false);
+        };
+
+        if (cards.length === 0) {
+          return <div className="flashcard-empty">No flashcards available</div>;
+        }
+
+        return (
+          <div className="flashcard-deck">
+            {title && <div className="flashcard-title">{title}</div>}
+
+            <div className="flashcard-progress">
+              Card {currentIndex + 1} of {cards.length}
+              {(knownCount > 0 || reviewCount > 0) && (
+                <span className="flashcard-score">
+                  {' '}• <span className="score-known">{knownCount} knew</span> / <span className="score-review">{reviewCount} review</span>
+                </span>
+              )}
+            </div>
+
+            <div className={`flashcard ${isFlipped ? 'flipped' : ''}`} onClick={handleFlip}>
+              <div className="flashcard-inner">
+                <div className="flashcard-front">
+                  <div className="flashcard-label">Question</div>
+                  <div
+                    className="flashcard-content"
+                    onClick={(e) => {
+                      if (onTermClick && currentCard?.front) {
+                        e.stopPropagation();
+                        onTermClick(currentCard.front);
+                      }
+                    }}
+                  >
+                    {currentCard?.front}
+                  </div>
+                  <div className="flashcard-tap-hint">Tap to reveal</div>
+                </div>
+                <div className="flashcard-back">
+                  <div className="flashcard-label">Answer</div>
+                  <div
+                    className="flashcard-content"
+                    onClick={(e) => {
+                      if (onTermClick && currentCard?.back) {
+                        e.stopPropagation();
+                        onTermClick(currentCard.back);
+                      }
+                    }}
+                  >
+                    {currentCard?.back}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flashcard-controls">
+              <button className="fc-btn" onClick={handlePrev} title="Previous card">←</button>
+              <button className="fc-btn fc-btn-review" onClick={handleNeedReview} title="Need to review">
+                Need Review
+              </button>
+              <button className="fc-btn fc-btn-knew" onClick={handleKnew} title="I knew it">
+                Knew It ✓
+              </button>
+              <button className="fc-btn" onClick={handleNext} title="Next card">→</button>
+              <button className="fc-btn" onClick={handleShuffle} title="Shuffle">⟳</button>
+            </div>
+          </div>
+        );
+      }
+
+      // Markdown renderer with support for special blocks (mermaid, chart, comparison, flashcards)
+      const renderMarkdown = (text, onInteractiveClick) => {
         if (!text) return null;
 
-        // First, extract mermaid blocks
-        const mermaidRegex = /```mermaid\s*([\s\S]*?)```/g;
+        // Unified regex for all special block types
+        const blockRegex = /```(mermaid|chart|comparison|flashcards)\s*([\s\S]*?)```/g;
         const parts = [];
         let lastIndex = 0;
         let match;
-        let mermaidCount = 0;
+        const counters = { mermaid: 0, chart: 0, comparison: 0, flashcards: 0 };
 
-        while ((match = mermaidRegex.exec(text)) !== null) {
-          // Add text before this mermaid block
+        while ((match = blockRegex.exec(text)) !== null) {
+          // Add text before this block
           if (match.index > lastIndex) {
             parts.push({ type: 'text', content: text.slice(lastIndex, match.index) });
           }
-          // Add mermaid block
-          parts.push({ type: 'mermaid', content: match[1].trim(), id: mermaidCount++ });
+          // Add the special block
+          const blockType = match[1];
+          parts.push({
+            type: blockType,
+            content: match[2].trim(),
+            id: counters[blockType]++
+          });
           lastIndex = match.index + match[0].length;
         }
+
         // Add remaining text
         if (lastIndex < text.length) {
           parts.push({ type: 'text', content: text.slice(lastIndex) });
         }
 
-        // If no mermaid blocks, use simple text rendering
+        // If no special blocks, use simple text rendering
         if (parts.length === 0) {
           parts.push({ type: 'text', content: text });
         }
@@ -419,10 +791,18 @@
         };
 
         return parts.map((part, idx) => {
-          if (part.type === 'mermaid') {
-            return <MermaidDiagram key={`mermaid-${idx}`} chart={part.content} id={part.id} />;
+          switch (part.type) {
+            case 'mermaid':
+              return <MermaidDiagram key={`mermaid-${idx}`} chart={part.content} id={part.id} onNodeClick={onInteractiveClick} />;
+            case 'chart':
+              return <ChartDiagram key={`chart-${idx}`} config={part.content} id={part.id} onLabelClick={onInteractiveClick} />;
+            case 'comparison':
+              return <ComparisonTable key={`comparison-${idx}`} config={part.content} onCellClick={onInteractiveClick} />;
+            case 'flashcards':
+              return <FlashcardDeck key={`flashcards-${idx}`} config={part.content} onTermClick={onInteractiveClick} />;
+            default:
+              return <React.Fragment key={`text-${idx}`}>{renderTextBlock(part.content, `t${idx}`)}</React.Fragment>;
           }
-          return <React.Fragment key={`text-${idx}`}>{renderTextBlock(part.content, `t${idx}`)}</React.Fragment>;
         });
       };
 
@@ -553,7 +933,7 @@
       // ============================================
       // UI COMPONENTS - Sidebar
       // ============================================
-      function Sidebar({ trees, activeId, onSelect, onNewChat, currentDepth, maxDepth, onJumpTo, onOpenSettings, hasApiKey }) {
+      function Sidebar({ trees, activeId, onSelect, onNewChat, currentDepth, maxDepth, onJumpTo, onOpenSettings, hasApiKey, collapsed, onToggleCollapse }) {
         const renderNode = (node, depth = 0) => (
           <li key={node.id}>
             <div className="tree-branch">
@@ -580,35 +960,48 @@
         );
 
         return (
-          <aside className="sidebar">
+          <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
             <div className="sidebar-header">
-              <div className="sidebar-title-row">
-                <h1>Learnly</h1>
-                <button
-                  className={`settings-btn ${hasApiKey ? 'has-key' : ''}`}
-                  onClick={onOpenSettings}
-                  title="Settings"
-                >
-                  ⚙
-                </button>
-              </div>
-              <p className="hint">Visual learning through branching exploration</p>
-              {!hasApiKey && (
-                <div className="api-warning" onClick={onOpenSettings}>
-                  ⚠ Add API key to enable AI
-                </div>
-              )}
-              <button className="primary-btn full-width" onClick={onNewChat}>
-                + New Thread
+              <button
+                className="collapse-btn"
+                onClick={onToggleCollapse}
+                title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              >
+                {collapsed ? '»' : '«'}
               </button>
+              {!collapsed && (
+                <>
+                  <div className="sidebar-title-row">
+                    <h1>Learnly</h1>
+                    <button
+                      className={`settings-btn ${hasApiKey ? 'has-key' : ''}`}
+                      onClick={onOpenSettings}
+                      title="Settings"
+                    >
+                      ⚙
+                    </button>
+                  </div>
+                  <p className="hint">Visual learning through branching exploration</p>
+                  {!hasApiKey && (
+                    <div className="api-warning" onClick={onOpenSettings}>
+                      ⚠ Add API key to enable AI
+                    </div>
+                  )}
+                  <button className="primary-btn full-width" onClick={onNewChat}>
+                    + New Thread
+                  </button>
+                </>
+              )}
             </div>
-            <DepthMeter currentDepth={currentDepth} maxDepth={maxDepth} />
-            <FoundationMap trees={trees} onJumpTo={onJumpTo} />
-            <div className="tree-list-container">
-              <ul className="tree-list">
-                {trees.map(t => renderNode(t, 0))}
-              </ul>
-            </div>
+            {!collapsed && <DepthMeter currentDepth={currentDepth} maxDepth={maxDepth} />}
+            {!collapsed && <FoundationMap trees={trees} onJumpTo={onJumpTo} />}
+            {!collapsed && (
+              <div className="tree-list-container">
+                <ul className="tree-list">
+                  {trees.map(t => renderNode(t, 0))}
+                </ul>
+              </div>
+            )}
           </aside>
         );
       }
@@ -742,7 +1135,7 @@
                     {isFoundation ? '★' : '☆'}
                   </button>
                   <div className="message-content">
-                    {msg.role === 'assistant' ? renderMarkdown(msg.text) : <p>{msg.text}</p>}
+                    {msg.role === 'assistant' ? renderMarkdown(msg.text, (nodeText) => onFork(nodeText, true)) : <p>{msg.text}</p>}
                   </div>
 
               {hasSuggestions && (
@@ -1077,7 +1470,7 @@
         isLoading,
         onSetExpertise,
       }) {
-        const [width, setWidth] = useState(380);
+        const [width, setWidth] = useState(700);
         const [isResizing, setIsResizing] = useState(false);
         const panelRef = useRef(null);
         const chatBodyRef = useRef(null);
@@ -1399,6 +1792,7 @@
         const [showPanel, setShowPanel] = useState(false);
         const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
         const [mergePreview, setMergePreview] = useState(null);
+        const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
         // API and settings state
         const [apiKey, setApiKey] = useState(() => localStorage.getItem(STORAGE_KEY_API) || "");
@@ -1656,6 +2050,53 @@ Use diagrams when they help visualize:
 
 Keep diagrams simple - 4-8 nodes max. You can always suggest branching into a subtopic for more detail.
 
+## Data Visualization with Charts:
+When showing numerical data, comparisons, or trends, use chart blocks:
+- **bar**: Compare quantities across categories
+- **line**: Show trends over time
+- **pie/doughnut**: Show proportions of a whole
+
+\`\`\`chart
+{
+  "type": "bar",
+  "title": "Chart Title",
+  "labels": ["Category 1", "Category 2", "Category 3"],
+  "datasets": [{ "label": "Series Name", "data": [10, 20, 15] }]
+}
+\`\`\`
+
+## Comparison Tables:
+When comparing options, features, or concepts side-by-side:
+
+\`\`\`comparison
+{
+  "title": "Option A vs Option B",
+  "headers": ["Aspect", "Option A", "Option B"],
+  "rows": [
+    ["Speed", "Fast", "Slow"],
+    ["Cost", "High", "Low"]
+  ],
+  "highlights": { "0,1": "pro", "1,2": "pro" }
+}
+\`\`\`
+
+Highlights: "row,col": "pro" (green), "con" (red), or "neutral" (yellow)
+
+## Flashcards for Learning:
+When teaching definitions, terms, or Q&A pairs, use flashcard decks:
+
+\`\`\`flashcards
+{
+  "title": "Key Concepts",
+  "cards": [
+    { "front": "What is X?", "back": "X is the definition here" },
+    { "front": "Term 2", "back": "Definition 2" }
+  ]
+}
+\`\`\`
+
+Use 3-6 cards per deck. Great for vocabulary, definitions, or testing understanding.
+
 ## Response Style:
 - **Concise over comprehensive** - they can always branch for more
 - Make terms and concepts INTERESTING so users want to click and explore them
@@ -1842,6 +2283,23 @@ Topic: "${node.title}"`;
           setNodes((prev) => ({ ...prev, [id]: newNode }));
           setActiveId(id);
           setShowPanel(true);
+
+          // Calculate approximate position of new thread and snap canvas to it
+          // New threads are placed to the right of existing ones
+          let estimatedX = 50;
+          Object.keys(positions).forEach((nodeId) => {
+            const pos = positions[nodeId];
+            if (pos) {
+              estimatedX = Math.max(estimatedX, pos.x + NODE_WIDTH + HORIZONTAL_GAP);
+            }
+          });
+
+          // Center the view on the new thread
+          setTransform({
+            x: -estimatedX + 100,
+            y: 0,
+            scale: 1,
+          });
         };
 
         const handleToggleFoundation = (nodeId, messageIndex) => {
@@ -1939,6 +2397,8 @@ Topic: "${node.title}"`;
               onJumpTo={selectNode}
               onOpenSettings={() => setShowSettings(true)}
               hasApiKey={!!apiKey}
+              collapsed={sidebarCollapsed}
+              onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
             />
 
             <div className="main-area">
