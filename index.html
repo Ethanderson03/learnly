@@ -28,7 +28,7 @@
       const NODE_HEIGHT = 70;
       const HORIZONTAL_GAP = 50;
       const VERTICAL_GAP = 80;
-      const API_ENDPOINT = "/api/chat";
+      const API_ENDPOINT = "/api/chat/stream";
       const STORAGE_KEY_API = "learnly_api_key";
       const STORAGE_KEY_MODEL = "learnly_model";
 
@@ -46,9 +46,9 @@
       ];
 
       // ============================================
-      // API HELPER
+      // API HELPER - Streaming
       // ============================================
-      const sendToClaudeAPI = async (messages, apiKey, model, systemPrompt) => {
+      const streamToClaudeAPI = async (messages, apiKey, model, systemPrompt, onChunk) => {
         const response = await fetch(API_ENDPOINT, {
           method: "POST",
           headers: {
@@ -66,13 +66,49 @@
           }),
         });
 
-        const data = await response.json();
-
-        if (!data.success) {
-          throw new Error(data.error || "API request failed");
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`API request failed: ${errorText}`);
         }
 
-        return data.message;
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let fullText = "";
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || ""; // Keep incomplete line in buffer
+
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              const data = line.slice(6);
+              if (data === "[DONE]") {
+                return fullText;
+              }
+
+              try {
+                const parsed = JSON.parse(data);
+                if (parsed.type === "text") {
+                  fullText += parsed.text;
+                  onChunk(fullText);
+                } else if (parsed.type === "error") {
+                  throw new Error(parsed.error);
+                }
+              } catch (e) {
+                if (e.message !== "Unexpected end of JSON input") {
+                  console.warn("Parse error:", e);
+                }
+              }
+            }
+          }
+        }
+
+        return fullText;
       };
 
       // ============================================
@@ -156,13 +192,14 @@
       // Parse AI response to extract suggestions and clean text
       const parseAIResponse = (text) => {
         const suggestionsMatch = text.match(/```suggestions\s*([\s\S]*?)```/);
-        let suggestions = { branches: [], quick_answers: [] };
+        let suggestions = { branches: [], quick_answers: [], title: null };
         let cleanText = text;
 
         if (suggestionsMatch) {
           try {
             const parsed = JSON.parse(suggestionsMatch[1].trim());
             suggestions = {
+              title: parsed.title || null,
               branches: parsed.branches || [],
               quick_answers: parsed.quick_answers || parsed.questions || [] // support both
             };
@@ -436,42 +473,139 @@
       }
 
       // ============================================
+      // UI COMPONENTS - Selection Popup
+      // ============================================
+      function SelectionPopup({ position, onExplore, onClose }) {
+        if (!position) return null;
+
+        return (
+          <div
+            className="selection-popup"
+            style={{ top: position.y, left: position.x }}
+          >
+            <button onClick={onExplore} className="explore-selection-btn">
+              <span className="explore-icon">↳</span>
+              Explore this
+            </button>
+          </div>
+        );
+      }
+
+      // ============================================
       // UI COMPONENTS - Message List
       // ============================================
       function MessageList({ messages, foundationMarkers = [], onToggleFoundation, nodeId, onFork, onQuickReply }) {
         const contentMessages = messages.filter(m => m.role !== 'system');
+        const [selectionInfo, setSelectionInfo] = useState(null);
+        const containerRef = useRef(null);
+
+        // Handle text selection in assistant messages
+        const handleMouseUp = (e, msgText) => {
+          const selection = window.getSelection();
+          const selectedText = selection.toString().trim();
+
+          if (selectedText && selectedText.length > 2 && selectedText.length < 200) {
+            const range = selection.getRangeAt(0);
+            const rect = range.getBoundingClientRect();
+            const containerRect = containerRef.current?.getBoundingClientRect() || { top: 0, left: 0 };
+
+            // Get surrounding context (the paragraph/sentence containing the selection)
+            const fullText = msgText;
+            const selectionStart = fullText.indexOf(selectedText);
+            let contextStart = Math.max(0, selectionStart - 150);
+            let contextEnd = Math.min(fullText.length, selectionStart + selectedText.length + 150);
+
+            // Try to find sentence boundaries
+            const beforeText = fullText.slice(contextStart, selectionStart);
+            const afterText = fullText.slice(selectionStart + selectedText.length, contextEnd);
+            const sentenceStartMatch = beforeText.match(/[.!?]\s+[A-Z][^.!?]*$/);
+            const sentenceEndMatch = afterText.match(/^[^.!?]*[.!?]/);
+
+            const contextBefore = sentenceStartMatch ? sentenceStartMatch[0].slice(2) : beforeText.slice(-100);
+            const contextAfter = sentenceEndMatch ? sentenceEndMatch[0] : afterText.slice(0, 100);
+            const surroundingContext = `...${contextBefore}${selectedText}${contextAfter}...`;
+
+            setSelectionInfo({
+              text: selectedText,
+              context: surroundingContext,
+              fullMessageText: msgText,
+              position: {
+                x: rect.left - containerRect.left + rect.width / 2,
+                y: rect.top - containerRect.top - 40
+              }
+            });
+          } else {
+            setSelectionInfo(null);
+          }
+        };
+
+        const handleExploreSelection = () => {
+          if (selectionInfo) {
+            // Pass both the selected text and its surrounding context
+            onFork(selectionInfo.text, true, selectionInfo.context);
+            setSelectionInfo(null);
+            window.getSelection().removeAllRanges();
+          }
+        };
+
+        // Close popup when clicking elsewhere
+        useEffect(() => {
+          const handleClickOutside = () => {
+            setTimeout(() => {
+              const selection = window.getSelection();
+              if (!selection.toString().trim()) {
+                setSelectionInfo(null);
+              }
+            }, 10);
+          };
+          document.addEventListener('mousedown', handleClickOutside);
+          return () => document.removeEventListener('mousedown', handleClickOutside);
+        }, []);
 
         if (!messages.length) {
           return <div className="empty">No messages yet. Ask something to begin exploring.</div>;
         }
 
-        return messages.map((msg, index) => {
-          const contentIndex = contentMessages.indexOf(msg);
-          const isFoundation = foundationMarkers.includes(contentIndex);
-          const isMerged = msg.mergedFrom || msg.origin;
-          const hasSuggestions = msg.suggestions && (msg.suggestions.branches?.length > 0 || msg.suggestions.quick_answers?.length > 0);
+        return (
+          <div ref={containerRef} className="message-list-container">
+            {selectionInfo && (
+              <SelectionPopup
+                position={selectionInfo.position}
+                onExplore={handleExploreSelection}
+                onClose={() => setSelectionInfo(null)}
+              />
+            )}
+            {messages.map((msg, index) => {
+              const contentIndex = contentMessages.indexOf(msg);
+              const isFoundation = foundationMarkers.includes(contentIndex);
+              const isMerged = msg.mergedFrom || msg.origin;
+              const hasSuggestions = msg.suggestions && (msg.suggestions.branches?.length > 0 || msg.suggestions.quick_answers?.length > 0);
 
-          return (
-            <div
-              className={`message ${msg.role} ${isFoundation ? 'is-foundation' : ''} ${isMerged ? 'is-merged' : ''}`}
-              key={index}
-            >
-              <div className="role">{msg.role}</div>
-              {isMerged && (
-                <div className="merged-badge">↩ Merged from: {msg.origin || msg.mergedFrom?.branchTitle}</div>
-              )}
-              {msg.role !== 'system' && (
-                <button
-                  className={`foundation-btn ${isFoundation ? 'marked' : ''}`}
-                  onClick={() => onToggleFoundation(nodeId, contentIndex)}
-                  title={isFoundation ? 'Unmark as foundation' : 'Mark as understood (foundation)'}
+              const isStreaming = msg.isStreaming;
+              const isEmptyStream = isStreaming && (!msg.text || msg.text.length === 0);
+
+              return (
+                <div
+                  className={`message ${msg.role} ${isFoundation ? 'is-foundation' : ''} ${isMerged ? 'is-merged' : ''} ${isStreaming ? 'streaming' : ''} ${isEmptyStream ? 'empty-stream' : ''}`}
+                  key={index}
+                  onMouseUp={msg.role === 'assistant' ? (e) => handleMouseUp(e, msg.text) : undefined}
                 >
-                  {isFoundation ? '★' : '☆'}
-                </button>
-              )}
-              <div className="message-content">
-                {msg.role === 'assistant' ? renderMarkdown(msg.text) : <p>{msg.text}</p>}
-              </div>
+                  <div className="role">{msg.role}</div>
+                  {isMerged && (
+                    <div className="merged-badge">↩ Merged from: {msg.origin || msg.mergedFrom?.branchTitle}</div>
+                  )}
+                  {msg.role !== 'system' && (
+                    <button
+                      className={`foundation-btn ${isFoundation ? 'marked' : ''}`}
+                      onClick={() => onToggleFoundation(nodeId, contentIndex)}
+                      title={isFoundation ? 'Unmark as foundation' : 'Mark as understood (foundation)'}
+                    >
+                      {isFoundation ? '★' : '☆'}
+                    </button>
+                  )}
+                  <div className="message-content">
+                    {msg.role === 'assistant' ? renderMarkdown(msg.text) : <p>{msg.text}</p>}
+                  </div>
 
               {hasSuggestions && (
                 <div className="suggestions-container">
@@ -483,7 +617,7 @@
                           <button
                             key={i}
                             className="suggestion-chip branch-chip"
-                            onClick={() => onFork(branch)}
+                            onClick={() => onFork(branch, true)}
                             title={`Fork into: ${branch}`}
                           >
                             <span className="chip-icon">↳</span>
@@ -513,9 +647,11 @@
                   )}
                 </div>
               )}
-            </div>
-          );
-        });
+                </div>
+              );
+            })}
+          </div>
+        );
       }
 
       // ============================================
@@ -788,6 +924,9 @@
       // ============================================
       // UI COMPONENTS - Node Panel (Chat View)
       // ============================================
+      // Store scroll positions outside component to persist across re-renders
+      const scrollPositions = {};
+
       function NodePanel({
         node,
         onClose,
@@ -803,11 +942,72 @@
         const [width, setWidth] = useState(380);
         const [isResizing, setIsResizing] = useState(false);
         const panelRef = useRef(null);
+        const chatBodyRef = useRef(null);
+        const prevNodeIdRef = useRef(null);
+        const prevMessageCountRef = useRef(0);
+        const isUserScrolledUpRef = useRef(false);
 
         const handleMouseDown = (e) => {
           e.preventDefault();
           setIsResizing(true);
         };
+
+        // Track if user has scrolled up from bottom
+        const handleScroll = () => {
+          if (!chatBodyRef.current) return;
+          const { scrollTop, scrollHeight, clientHeight } = chatBodyRef.current;
+          const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
+          isUserScrolledUpRef.current = !isAtBottom;
+
+          // Save scroll position for this node
+          if (node) {
+            scrollPositions[node.id] = scrollTop;
+          }
+        };
+
+        // Save scroll position when switching away from a node
+        useEffect(() => {
+          if (prevNodeIdRef.current && prevNodeIdRef.current !== node?.id && chatBodyRef.current) {
+            scrollPositions[prevNodeIdRef.current] = chatBodyRef.current.scrollTop;
+          }
+          prevNodeIdRef.current = node?.id;
+        }, [node?.id]);
+
+        // Restore scroll position when switching to a node
+        useEffect(() => {
+          if (!node || !chatBodyRef.current) return;
+
+          const savedPosition = scrollPositions[node.id];
+          if (savedPosition !== undefined) {
+            // Restore saved position
+            chatBodyRef.current.scrollTop = savedPosition;
+            isUserScrolledUpRef.current = false;
+          } else {
+            // New node - scroll to bottom
+            chatBodyRef.current.scrollTop = chatBodyRef.current.scrollHeight;
+          }
+        }, [node?.id]);
+
+        // Auto-scroll when new messages arrive (unless user scrolled up)
+        useEffect(() => {
+          if (!node || !chatBodyRef.current) return;
+
+          const messageCount = node.messages.length;
+          const hasNewMessage = messageCount > prevMessageCountRef.current;
+          prevMessageCountRef.current = messageCount;
+
+          // Check if the last message is streaming
+          const lastMessage = node.messages[node.messages.length - 1];
+          const isStreaming = lastMessage?.isStreaming;
+
+          // Auto-scroll if: new message arrived OR streaming, AND user hasn't scrolled up
+          if ((hasNewMessage || isStreaming) && !isUserScrolledUpRef.current) {
+            chatBodyRef.current.scrollTo({
+              top: chatBodyRef.current.scrollHeight,
+              behavior: isStreaming ? 'auto' : 'smooth'
+            });
+          }
+        }, [node?.messages]);
 
         useEffect(() => {
           const handleMouseMove = (e) => {
@@ -867,23 +1067,19 @@
                 </button>
               </div>
             </div>
-            <div className="panel-body chat-body">
+            <div
+              className="panel-body chat-body"
+              ref={chatBodyRef}
+              onScroll={handleScroll}
+            >
               <MessageList
                 messages={node.messages}
                 foundationMarkers={node.foundationMarkers || []}
                 onToggleFoundation={onToggleFoundation}
                 nodeId={node.id}
-                onFork={(topic) => onFork(node.id, topic)}
+                onFork={(topic, autoSend, immediateContext) => onFork(node.id, topic, autoSend, immediateContext)}
                 onQuickReply={(text) => onSend(node.id, text)}
               />
-              {isLoading && (
-                <div className="message assistant loading">
-                  <div className="role">ASSISTANT</div>
-                  <p className="thinking-indicator">
-                    <span className="thinking-dots">thinking</span>
-                  </p>
-                </div>
-              )}
             </div>
             <Composer
               onSend={(text) => onSend(node.id, text)}
@@ -1055,6 +1251,22 @@
         const [isLoading, setIsLoading] = useState(false);
         const [error, setError] = useState(null);
 
+        // Pending auto-send for forked nodes
+        const [pendingSend, setPendingSend] = useState(null);
+        const handleSendRef = useRef(null);
+
+        // Effect to handle pending auto-sends when node becomes available
+        useEffect(() => {
+          if (pendingSend && nodes[pendingSend.id]) {
+            const { id, text } = pendingSend;
+            setPendingSend(null);
+            // Small delay to ensure state is fully settled
+            setTimeout(() => {
+              handleSendRef.current(id, text);
+            }, 50);
+          }
+        }, [pendingSend, nodes]);
+
         // Build enriched tree (supports multiple top-level threads)
         const trees = useMemo(() => {
           const childrenMap = {};
@@ -1193,6 +1405,10 @@
           setIsLoading(true);
           setError(null);
 
+          // Add empty assistant message for streaming
+          const streamingMsgIndex = nodes[id].messages.length + 1; // +1 for user msg we just added
+          addMessages(id, [{ role: "assistant", text: "", isStreaming: true }]);
+
           try {
             const node = nodes[id];
             const conversationHistory = [...node.messages, { role: "user", text }];
@@ -1202,6 +1418,11 @@
             const expertiseLevel = node.expertiseLevel;
             const isFirstMessage = node.messages.filter(m => m.role === 'user').length === 0;
             const isTopLevel = node.parentId === null;
+
+            // Get parent context if this is a forked thread
+            const systemMsg = node.messages.find(m => m.role === 'system');
+            const parentContext = systemMsg?.parentContext || '';
+            const immediateContext = systemMsg?.immediateContext || '';
 
             const expertiseContext = expertiseLevel
               ? `The user has indicated they are at expertise level ${expertiseLevel}/5 (1=complete novice, 5=expert).`
@@ -1213,64 +1434,142 @@
               ? `Current exploration depth: ${depth}. The user has branched ${depth} level(s) deep into subtopics.`
               : '';
 
-            const systemPrompt = `You are a thoughtful tutor in Learnly, helping users build deep understanding through the Socratic method and structured exploration.
+            const immediateContextSection = immediateContext
+              ? `\n## IMPORTANT - The user selected this specific text to explore:\n"${immediateContext}"\n\nExplain the highlighted concept IN THIS CONTEXT. Don't give a generic definition - explain what it means in the specific situation described above.`
+              : '';
 
-## Your Teaching Approach:
-1. **Assess first**: Before explaining, understand what the user already knows
-2. **Build foundations**: Ensure prerequisites are solid before advancing
-3. **Scaffold learning**: Break complex topics into digestible pieces
-4. **Check understanding**: Pause to verify comprehension before moving on
-5. **Encourage curiosity**: Highlight interesting tangents worth exploring
+            const parentContextSection = parentContext
+              ? `\n## Background from parent conversation:\n${parentContext}\n\nBuild on this foundation - the user has already discussed the above.`
+              : '';
+
+            const systemPrompt = `You are a guide in Learnly, an exploration-first learning tool. Your job is to help users discover what interests them by offering clear, concise explanations with many paths to explore deeper.
+
+## CRITICAL: Exploration Over Clarification
+This tool works differently than typical AI interactions:
+- Users learn by BRANCHING into subtopics, not by you asking clarifying questions
+- Don't ask "what aspect interests you?" - instead, explain briefly and offer interesting branches
+- The UI lets users click on ANY term to explore it - your job is to make concepts click-worthy
+- Short, curiosity-sparking responses beat thorough explanations
+- If unsure what they want, give a quick overview with MANY branch options - let them choose their path
+
+## Depth-Aware Behavior:
+${depth === 0 ? `- This is a TOP-LEVEL thread - user is likely still figuring out what they want to learn
+- Keep responses SHORT (2-3 paragraphs max)
+- Offer 4+ diverse branch suggestions spanning different aspects
+- Don't ask what they already know - just start explaining accessibly` : ''}
+${depth > 0 && depth <= 2 ? `- User has branched ${depth} level(s) deep - they're narrowing focus
+- Give more detail than top-level, but still prioritize branches over exhaustive explanation
+- 3-4 branch suggestions, more specific to this subtopic` : ''}
+${depth > 2 ? `- User is ${depth} levels deep - they're clearly interested in detail here
+- Can give more thorough explanations
+- 2-3 very specific branch suggestions` : ''}
 
 ${expertiseContext}
-${depthContext}
+${immediateContextSection}
+${parentContextSection}
 
 ## Response Style:
-- Be conversational but substantive
-- Use analogies and examples the user can relate to
-- Format with markdown: **bold** for key terms, bullet lists for concepts
-- Keep responses focused - don't overwhelm with too much at once
+- **Concise over comprehensive** - they can always branch for more
+- Make terms and concepts INTERESTING so users want to click and explore them
+- Use **bold** for key terms that would make good exploration branches
+- Bullet points for listing related concepts
+- NO clarifying questions like "what do you want to focus on?" - just provide content and branches
 
 ## IMPORTANT - End every response with this JSON block:
 
 \`\`\`suggestions
 {
-  "branches": ["Subtopic 1", "Subtopic 2", "Subtopic 3"],
-  "quick_answers": ["I understand this", "Explain more simply", "Give me an example"]
+  "title": "Short topic title (3-5 words)",
+  "branches": ["Interesting Subtopic 1", "Interesting Subtopic 2", "Interesting Subtopic 3", "Interesting Subtopic 4"],
+  "quick_answers": ["Tell me more", "How does this work?", "Why does this matter?"]
 }
 \`\`\`
 
-- **branches**: 2-4 specific subtopics to explore deeper (become fork buttons)
-- **quick_answers**: 2-3 short responses the user can click to quickly reply (like "Yes, I know this", "Not sure, explain more", "Let's skip this"). These should be contextual to what you just asked or explained.
+- **title**: Concise title (3-5 words) capturing the topic. Update as focus becomes clearer.
+- **branches**: ${depth === 0 ? '4-5' : depth <= 2 ? '3-4' : '2-3'} interesting subtopics to explore. Make them SPECIFIC and INTRIGUING - not generic. These become clickable fork buttons.
+- **quick_answers**: 2-3 prompts that continue the conversation. Focus on "tell me more" style prompts, NOT clarifying questions back at the user.
 
-Topic: "${node.title}"
-Help the user build genuine understanding.`;
+Topic: "${node.title}"`;
 
-            const response = await sendToClaudeAPI(
+            // Stream the response and update message progressively
+            const fullResponse = await streamToClaudeAPI(
               conversationHistory,
               apiKey,
               model,
-              systemPrompt
+              systemPrompt,
+              (partialText) => {
+                // Update the streaming message with partial text
+                setNodes(prev => {
+                  const currentNode = prev[id];
+                  const messages = [...currentNode.messages];
+                  const lastMsg = messages[messages.length - 1];
+                  if (lastMsg && lastMsg.isStreaming) {
+                    messages[messages.length - 1] = {
+                      ...lastMsg,
+                      text: partialText
+                    };
+                  }
+                  return {
+                    ...prev,
+                    [id]: { ...currentNode, messages }
+                  };
+                });
+              }
             );
 
-            // Parse the response to extract suggestions
-            const { cleanText, suggestions } = parseAIResponse(response);
-            addMessages(id, [{
-              role: "assistant",
-              text: cleanText,
-              suggestions: suggestions
-            }]);
+            // Parse the final response to extract suggestions
+            const { cleanText, suggestions } = parseAIResponse(fullResponse);
+
+            // Finalize the message with parsed content and suggestions
+            setNodes(prev => {
+              const currentNode = prev[id];
+              const messages = [...currentNode.messages];
+              const lastMsg = messages[messages.length - 1];
+              if (lastMsg && lastMsg.isStreaming) {
+                messages[messages.length - 1] = {
+                  role: "assistant",
+                  text: cleanText,
+                  suggestions: suggestions,
+                  isStreaming: false
+                };
+              }
+
+              // Update title if AI suggested one
+              const newTitle = suggestions.title || currentNode.title;
+
+              return {
+                ...prev,
+                [id]: { ...currentNode, messages, title: newTitle }
+              };
+            });
+
           } catch (err) {
             console.error("API Error:", err);
             setError(err.message);
-            addMessages(id, [{
-              role: "assistant",
-              text: `Error: ${err.message}\n\nPlease check your API key in Settings.`
-            }]);
+            // Update the streaming message with error
+            setNodes(prev => {
+              const currentNode = prev[id];
+              const messages = [...currentNode.messages];
+              const lastMsg = messages[messages.length - 1];
+              if (lastMsg && lastMsg.isStreaming) {
+                messages[messages.length - 1] = {
+                  role: "assistant",
+                  text: `Error: ${err.message}\n\nPlease check your API key in Settings.`,
+                  isStreaming: false
+                };
+              }
+              return {
+                ...prev,
+                [id]: { ...currentNode, messages }
+              };
+            });
           } finally {
             setIsLoading(false);
           }
         };
+
+        // Keep ref updated for useEffect
+        handleSendRef.current = handleSend;
 
         const makeTitle = (parentTitle, selection) => {
           if (selection) {
@@ -1280,29 +1579,66 @@ Help the user build genuine understanding.`;
           return `${parentTitle} fork`;
         };
 
-        const handleFork = (fromId, explicitSelection) => {
+        // Compress parent thread context for passing to child fork
+        const compressContext = (node) => {
+          const msgs = node.messages.filter(m => m.role !== 'system');
+          if (msgs.length === 0) return '';
+
+          // Get key exchanges (last few Q&A pairs)
+          const exchanges = [];
+          for (let i = 0; i < msgs.length - 1; i++) {
+            if (msgs[i].role === 'user' && msgs[i + 1].role === 'assistant') {
+              exchanges.push({
+                q: msgs[i].text.slice(0, 100),
+                a: msgs[i + 1].text.slice(0, 200)
+              });
+            }
+          }
+
+          // Take last 2-3 exchanges
+          const recent = exchanges.slice(-3);
+          if (recent.length === 0) return '';
+
+          return recent.map(ex => `Q: ${ex.q}\nA: ${ex.a}`).join('\n\n');
+        };
+
+        const handleFork = async (fromId, explicitSelection, autoSend = false, immediateContext = null) => {
           const base = nodes[fromId];
           const picked = (explicitSelection && explicitSelection.trim()) || selectionText();
           const contextSnippet = picked || base.messages.slice(-1).map((m) => m.text).join(" ").slice(0, 50);
           const id = `node-${Date.now()}-${Math.round(Math.random() * 9999)}`;
 
+          // Compress context from parent for the fork
+          const parentContext = compressContext(base);
+
+          // Create the new node
           const newNode = createNode({
             id,
             parentId: fromId,
             title: makeTitle(base.title, contextSnippet),
+            expertiseLevel: base.expertiseLevel, // Inherit expertise from parent
             messages: [
               {
                 role: "system",
                 origin: base.title,
-                text: `Forked from "${base.title}": ${contextSnippet || "exploring new direction"}`,
+                text: `Forked from "${base.title}" to explore: ${contextSnippet || "new direction"}`,
+                parentContext: parentContext,
+                immediateContext: immediateContext, // The sentence/paragraph where the term appeared
               },
-              { role: "assistant", text: "What aspect would you like to explore in this branch?" },
             ],
           });
 
           setNodes((prev) => ({ ...prev, [id]: newNode }));
           setActiveId(id);
           setShowPanel(true);
+
+          // If autoSend, queue up the send for when node is available
+          if (autoSend && picked) {
+            const contextualRequest = immediateContext
+              ? `Explain "${picked}" in this context: ${immediateContext}`
+              : `I want to explore: ${picked}`;
+            setPendingSend({ id, text: contextualRequest });
+          }
         };
 
         const handleNewChat = () => {
