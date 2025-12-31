@@ -11,8 +11,8 @@
 
   /* Text Colors */
   --text-primary: #e8e8e8;
-  --text-secondary: #a0a0a0;
-  --text-muted: #707070;
+  --text-secondary: #b8b8b8;
+  --text-muted: #909090;
   --text-bright: #ffffff;
 
   /* Accent Colors for Status */
@@ -30,9 +30,9 @@
   --scanline-opacity: 0.02;
 
   /* Borders */
-  --border-dim: #2a2a2a;
-  --border-medium: #3a3a3a;
-  --border-bright: #4a4a4a;
+  --border-dim: #333333;
+  --border-medium: #444444;
+  --border-bright: #555555;
 
   /* Typography */
   --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Consolas', monospace;
