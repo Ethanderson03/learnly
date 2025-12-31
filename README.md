@@ -1,4 +1,4 @@
-# Learnly
+# Fork
 
 An AI-powered learning tool that uses branching conversations to help you explore topics deeply. Fork off into subtopics, mark concepts as understood, and let the AI tutor adapt to your expertise level.
 
@@ -37,8 +37,8 @@ The AI can generate rich interactive content:
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/Ethanderson03/learnly.git
-cd learnly
+git clone https://github.com/Ethanderson03/fork.git
+cd fork
 ```
 
 2. Start the server:

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Learnly - Visual Learning Tree</title>
+    <title>Fork - Visual Learning Tree</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -58,8 +58,8 @@
       const HORIZONTAL_GAP = 50;
       const VERTICAL_GAP = 80;
       const API_ENDPOINT = "/api/chat/stream";
-      const STORAGE_KEY_API = "learnly_api_key";
-      const STORAGE_KEY_MODEL = "learnly_model";
+      const STORAGE_KEY_API = "fork_api_key";
+      const STORAGE_KEY_MODEL = "fork_model";
 
       const MODELS = [
         { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4", description: "Best balance of speed and intelligence" },
@@ -70,7 +70,7 @@
       const initialRootMessages = [
         {
           role: "assistant",
-          text: "Welcome to Learnly. Ask any question to begin exploring. Fork conversations to dig deeper into specific concepts. Mark messages as 'foundations' when you understand them.\n\nClick the ⚙ button in the sidebar to add your Anthropic API key.",
+          text: "Welcome to Fork. Ask any question to begin exploring. Fork conversations to dig deeper into specific concepts. Mark messages as 'foundations' when you understand them.\n\nClick the ⚙ button in the sidebar to add your Anthropic API key.",
         },
       ];
 
@@ -1008,7 +1008,7 @@
                 «
               </button>
               <div className="sidebar-title-row">
-                <h1>Learnly</h1>
+                <h1>Fork</h1>
                 <button
                   className={`settings-btn ${hasApiKey ? 'has-key' : ''}`}
                   onClick={onOpenSettings}
@@ -2032,7 +2032,7 @@
               ? `\n## Background from parent conversation:\n${parentContext}\n\nBuild on this foundation - the user has already discussed the above.`
               : '';
 
-            const systemPrompt = `You are a guide in Learnly, an exploration-first learning tool. Your job is to help users discover what interests them by offering clear, concise explanations with many paths to explore deeper.
+            const systemPrompt = `You are a guide in Fork, an exploration-first learning tool. Your job is to help users discover what interests them by offering clear, concise explanations with many paths to explore deeper.
 
 ## CRITICAL: Exploration Over Clarification
 This tool works differently than typical AI interactions:

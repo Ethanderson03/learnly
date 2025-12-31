@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Learnly Server - Static file server with Anthropic API proxy
+Fork Server - Static file server with Anthropic API proxy
 Run with: python server.py
 """
 
@@ -15,7 +15,7 @@ from socketserver import ThreadingMixIn
 PORT = 4173
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 
-class LearnlyHandler(SimpleHTTPRequestHandler):
+class ForkHandler(SimpleHTTPRequestHandler):
     def do_OPTIONS(self):
         """Handle CORS preflight requests"""
         self.send_response(200)
@@ -246,7 +246,7 @@ class LearnlyHandler(SimpleHTTPRequestHandler):
 def main():
     print(f"""
 ╔═══════════════════════════════════════════════════════════╗
-║                    LEARNLY SERVER                         ║
+║                      FORK SERVER                          ║
 ╠═══════════════════════════════════════════════════════════╣
 ║  Static files + Anthropic API proxy (with streaming)      ║
 ║                                                           ║
@@ -260,7 +260,7 @@ def main():
     class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
         daemon_threads = True
 
-    server = ThreadingHTTPServer(("", PORT), LearnlyHandler)
+    server = ThreadingHTTPServer(("", PORT), ForkHandler)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
