@@ -60,6 +60,40 @@
       const API_ENDPOINT = "/api/chat/stream";
       const STORAGE_KEY_API = "fork_api_key";
       const STORAGE_KEY_MODEL = "fork_model";
+      const STORAGE_KEY_NODES = "fork_nodes";
+      const STORAGE_KEY_ACTIVE = "fork_active_id";
+
+      // Load saved nodes from localStorage
+      const loadSavedNodes = () => {
+        try {
+          const saved = localStorage.getItem(STORAGE_KEY_NODES);
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            // Validate that we have at least one node
+            if (parsed && Object.keys(parsed).length > 0) {
+              console.log("[Storage] Loaded", Object.keys(parsed).length, "nodes from localStorage");
+              return parsed;
+            }
+          }
+        } catch (e) {
+          console.warn("[Storage] Failed to load nodes:", e);
+        }
+        return null;
+      };
+
+      // Debounced save to localStorage
+      let saveTimeout = null;
+      const saveNodesToStorage = (nodes) => {
+        if (saveTimeout) clearTimeout(saveTimeout);
+        saveTimeout = setTimeout(() => {
+          try {
+            localStorage.setItem(STORAGE_KEY_NODES, JSON.stringify(nodes));
+            console.log("[Storage] Saved", Object.keys(nodes).length, "nodes");
+          } catch (e) {
+            console.warn("[Storage] Failed to save nodes:", e);
+          }
+        }, 500); // Debounce 500ms
+      };
 
       const MODELS = [
         { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4", description: "Best balance of speed and intelligence" },
@@ -79,14 +113,46 @@
       // ============================================
       const streamToClaudeAPI = async (messages, apiKey, model, systemPrompt, onChunk) => {
         // Filter to only user/assistant messages with valid text content
-        const apiMessages = messages
+        const filteredMessages = messages
           .filter(m => (m.role === "user" || m.role === "assistant") && m.text)
           .map(m => ({
             role: m.role,
             content: m.text
           }));
 
-        console.log("[API] Sending messages:", apiMessages.length, apiMessages);
+        // Merge consecutive messages with the same role (API requires alternating roles)
+        const mergedMessages = filteredMessages.reduce((acc, msg) => {
+          if (acc.length > 0 && acc[acc.length - 1].role === msg.role) {
+            // Merge with previous message of same role
+            acc[acc.length - 1].content += "\n\n" + msg.content;
+          } else {
+            acc.push({ ...msg });
+          }
+          return acc;
+        }, []);
+
+        // Limit context to prevent token overflow (keep ~last 20 messages or ~30k chars)
+        const MAX_CONTEXT_CHARS = 30000;
+        let totalChars = mergedMessages.reduce((sum, m) => sum + m.content.length, 0);
+        let apiMessages = mergedMessages;
+
+        if (totalChars > MAX_CONTEXT_CHARS) {
+          // Keep trimming oldest messages until under limit (always keep at least last 4)
+          apiMessages = [...mergedMessages];
+          while (apiMessages.length > 4 && totalChars > MAX_CONTEXT_CHARS) {
+            const removed = apiMessages.shift();
+            totalChars -= removed.content.length;
+          }
+          console.log("[API] Trimmed context from", mergedMessages.length, "to", apiMessages.length, "messages");
+        }
+
+        // Ensure conversation starts with user message (API requirement)
+        if (apiMessages.length > 0 && apiMessages[0].role === 'assistant') {
+          apiMessages.shift();
+          console.log("[API] Removed leading assistant message");
+        }
+
+        console.log("[API] Sending messages:", apiMessages.length, "total chars:", totalChars);
 
         let response;
         try {
@@ -200,6 +266,7 @@
         foundationMarkers = [],
         mergeHistory = [],
         expertiseLevel = null, // null = not set, 1-5 scale (novice to expert)
+        prereqAssessment = null, // null = not assessed, { conceptName: level } when assessed
       }) => ({
         id,
         parentId,
@@ -211,6 +278,7 @@
         foundationMarkers,
         mergeHistory,
         expertiseLevel,
+        prereqAssessment,
       });
 
       const selectionText = () => {
@@ -264,10 +332,12 @@
         return 'needs-review';
       };
 
-      // Parse AI response to extract suggestions and clean text
+      // Parse AI response to extract suggestions, prereqs, and clean text
       const parseAIResponse = (text) => {
         const suggestionsMatch = text.match(/```suggestions\s*([\s\S]*?)```/);
+        const prereqsMatch = text.match(/```prereqs\s*([\s\S]*?)```/);
         let suggestions = { branches: [], quick_answers: [], title: null };
+        let prereqs = null;
         let cleanText = text;
 
         if (suggestionsMatch) {
@@ -278,13 +348,25 @@
               branches: parsed.branches || [],
               quick_answers: parsed.quick_answers || parsed.questions || [] // support both
             };
-            cleanText = text.replace(/```suggestions\s*[\s\S]*?```/, '').trim();
+            cleanText = cleanText.replace(/```suggestions\s*[\s\S]*?```/, '').trim();
           } catch (e) {
             console.warn('Failed to parse suggestions:', e);
           }
         }
 
-        return { cleanText, suggestions };
+        if (prereqsMatch) {
+          try {
+            prereqs = JSON.parse(prereqsMatch[1].trim());
+            cleanText = cleanText.replace(/```prereqs\s*[\s\S]*?```/, '').trim();
+            console.log('[parseAIResponse] Found prereqs block:', prereqs);
+          } catch (e) {
+            console.warn('Failed to parse prereqs:', e);
+          }
+        } else {
+          console.log('[parseAIResponse] No prereqs block found in response');
+        }
+
+        return { cleanText, suggestions, prereqs };
       };
 
       // Mermaid Diagram Component with clickable nodes and lightbox
@@ -959,7 +1041,7 @@
       // ============================================
       // UI COMPONENTS - Sidebar
       // ============================================
-      function Sidebar({ trees, activeId, onSelect, onNewChat, currentDepth, maxDepth, onJumpTo, onOpenSettings, hasApiKey, collapsed, onToggleCollapse }) {
+      function Sidebar({ trees, activeId, onSelect, onNewChat, currentDepth, maxDepth, onJumpTo, onOpenSettings, hasApiKey, collapsed, onToggleCollapse, onClearAll }) {
         const renderNode = (node, depth = 0) => (
           <li key={node.id}>
             <div className="tree-branch">
@@ -1034,6 +1116,11 @@
                 {trees.map(t => renderNode(t, 0))}
               </ul>
             </div>
+            <div className="sidebar-footer">
+              <button className="ghost-btn clear-all-btn" onClick={onClearAll}>
+                Clear All Data
+              </button>
+            </div>
           </aside>
         );
       }
@@ -1060,7 +1147,7 @@
       // ============================================
       // UI COMPONENTS - Message List
       // ============================================
-      function MessageList({ messages, foundationMarkers = [], onToggleFoundation, nodeId, onFork, onQuickReply }) {
+      function MessageList({ messages, foundationMarkers = [], onToggleFoundation, nodeId, onFork, onQuickReply, prereqAssessment, onSetPrereqAssessment }) {
         const contentMessages = messages.filter(m => m.role !== 'system');
         const [selectionInfo, setSelectionInfo] = useState(null);
         const containerRef = useRef(null);
@@ -1149,12 +1236,27 @@
               const isStreaming = msg.isStreaming;
               const isEmptyStream = isStreaming && (!msg.text || msg.text.length === 0);
 
+              // If this message has prereqs and they haven't been assessed, show ONLY the prereqs
+              const showOnlyPrereqs = msg.prereqs && !prereqAssessment && !msg.isStreaming;
+
               return (
                 <div
                   className={`message ${msg.role} ${isFoundation ? 'is-foundation' : ''} ${isMerged ? 'is-merged' : ''} ${isStreaming ? 'streaming' : ''} ${isEmptyStream ? 'empty-stream' : ''}`}
                   key={index}
                   onMouseUp={msg.role === 'assistant' ? (e) => handleMouseUp(e, msg.text) : undefined}
                 >
+                  {/* Show prereqs FIRST if they exist and aren't assessed */}
+                  {showOnlyPrereqs && (
+                    <PrereqAssessment
+                      prereqs={msg.prereqs}
+                      onComplete={(results) => onSetPrereqAssessment(nodeId, results)}
+                      onForkPrereq={(concept) => onFork(concept, true)}
+                    />
+                  )}
+
+                  {/* Hide the rest of the message if showing prereqs only */}
+                  {!showOnlyPrereqs && (
+                    <>
                   <div className="role">{msg.role}</div>
                   {isMerged && (
                     <div className="merged-badge">↩ Merged from: {msg.origin || msg.mergedFrom?.branchTitle}</div>
@@ -1210,6 +1312,8 @@
                   )}
                 </div>
               )}
+                    </>
+                  )}
                 </div>
               );
             })}
@@ -1250,6 +1354,98 @@
             <div className="expertise-hint">
               This helps tailor explanations to your level
             </div>
+          </div>
+        );
+      }
+
+      // ============================================
+      // UI COMPONENTS - Prerequisite Assessment
+      // ============================================
+      function PrereqAssessment({ prereqs, onComplete, onForkPrereq }) {
+        const [selections, setSelections] = useState({});
+
+        if (!prereqs || !prereqs.concepts) return null;
+
+        const { topic, concepts, tooMany } = prereqs;
+        const allSelected = concepts.every(c => selections[c.name] !== undefined);
+
+        const handleSelect = (conceptName, level) => {
+          setSelections(prev => ({ ...prev, [conceptName]: level }));
+        };
+
+        const handleContinue = () => {
+          if (allSelected) {
+            onComplete(selections);
+          }
+        };
+
+        return (
+          <div className="prereq-assessment">
+            <div className="prereq-header">
+              <span className="prereq-icon">🎯</span>
+              <span className="prereq-title">
+                Before diving into <strong>{topic}</strong>, let's gauge your background
+              </span>
+            </div>
+
+            {tooMany && (
+              <div className="prereq-warning">
+                <span className="warning-icon">⚠️</span>
+                This topic has many prerequisites. Consider exploring foundational concepts first.
+              </div>
+            )}
+
+            <div className="prereq-concepts">
+              {concepts.map((concept) => (
+                <div key={concept.name} className="prereq-card">
+                  <div className="prereq-concept-header">
+                    <span className="concept-name">{concept.name}</span>
+                    {concept.importance === 'critical' && (
+                      <span className="importance-badge critical">Critical</span>
+                    )}
+                    {concept.importance === 'high' && (
+                      <span className="importance-badge high">Important</span>
+                    )}
+                  </div>
+                  <div className="prereq-statements">
+                    {/* Level 0 - hardcoded "no idea" option */}
+                    <button
+                      className={`prereq-statement level-zero ${selections[concept.name] === 0 ? 'selected' : ''}`}
+                      onClick={() => handleSelect(concept.name, 0)}
+                    >
+                      <span className="statement-level">L0</span>
+                      <span className="statement-text">I have no idea what this is</span>
+                    </button>
+                    {concept.levels.map((lvl) => (
+                      <button
+                        key={lvl.level}
+                        className={`prereq-statement ${selections[concept.name] === lvl.level ? 'selected' : ''}`}
+                        onClick={() => handleSelect(concept.name, lvl.level)}
+                      >
+                        <span className="statement-level">L{lvl.level}</span>
+                        <span className="statement-text">{lvl.statement}</span>
+                      </button>
+                    ))}
+                  </div>
+                  {tooMany && (
+                    <button
+                      className="prereq-fork-btn"
+                      onClick={() => onForkPrereq(concept.name)}
+                    >
+                      ↳ Learn {concept.name} first
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <button
+              className={`prereq-continue-btn ${allSelected ? 'ready' : ''}`}
+              onClick={handleContinue}
+              disabled={!allSelected}
+            >
+              {allSelected ? 'Continue with explanation →' : `Select your level for each concept (${Object.keys(selections).length}/${concepts.length})`}
+            </button>
           </div>
         );
       }
@@ -1497,10 +1693,12 @@
         onFork,
         onToggleFoundation,
         onCloseWithMerge,
+        onDelete,
         lineage,
         onJump,
         isLoading,
         onSetExpertise,
+        onSetPrereqAssessment,
       }) {
         const [width, setWidth] = useState(700);
         const [isResizing, setIsResizing] = useState(false);
@@ -1551,7 +1749,7 @@
           }
         }, [node?.id]);
 
-        // Auto-scroll when new messages arrive (unless user scrolled up)
+        // Auto-scroll only when NEW messages arrive (not during streaming)
         useEffect(() => {
           if (!node || !chatBodyRef.current) return;
 
@@ -1563,11 +1761,12 @@
           const lastMessage = node.messages[node.messages.length - 1];
           const isStreaming = lastMessage?.isStreaming;
 
-          // Auto-scroll if: new message arrived OR streaming, AND user hasn't scrolled up
-          if ((hasNewMessage || isStreaming) && !isUserScrolledUpRef.current) {
+          // Only auto-scroll when a NEW message appears (user sent or assistant starts)
+          // Do NOT auto-scroll during streaming - let user read top to bottom
+          if (hasNewMessage && !isStreaming && !isUserScrolledUpRef.current) {
             chatBodyRef.current.scrollTo({
               top: chatBodyRef.current.scrollHeight,
-              behavior: isStreaming ? 'auto' : 'smooth'
+              behavior: 'smooth'
             });
           }
         }, [node?.messages]);
@@ -1625,6 +1824,17 @@
                     ↩ Merge
                   </button>
                 )}
+                <button
+                  className="ghost-btn delete-btn"
+                  onClick={() => {
+                    if (confirm(`Delete "${node.title}" and all its branches?`)) {
+                      onDelete(node.id);
+                    }
+                  }}
+                  title="Delete thread"
+                >
+                  🗑
+                </button>
                 <button className="ghost-btn" onClick={onClose} title="Close panel">
                   ✕
                 </button>
@@ -1642,6 +1852,8 @@
                 nodeId={node.id}
                 onFork={(topic, autoSend, immediateContext) => onFork(node.id, topic, autoSend, immediateContext)}
                 onQuickReply={(text) => onSend(node.id, text)}
+                prereqAssessment={node.prereqAssessment}
+                onSetPrereqAssessment={onSetPrereqAssessment}
               />
             </div>
             <Composer
@@ -1812,15 +2024,25 @@
       // MAIN APP
       // ============================================
       function App() {
-        const [nodes, setNodes] = useState({
-          root: createNode({
-            id: "root",
-            title: "Main Thread",
-            messages: initialRootMessages,
-            parentId: null
-          }),
+        // Initialize nodes from localStorage or create default
+        const [nodes, setNodes] = useState(() => {
+          const saved = loadSavedNodes();
+          if (saved) return saved;
+          return {
+            root: createNode({
+              id: "root",
+              title: "Main Thread",
+              messages: initialRootMessages,
+              parentId: null
+            }),
+          };
         });
-        const [activeId, setActiveId] = useState("root");
+
+        // Initialize activeId from localStorage
+        const [activeId, setActiveId] = useState(() => {
+          const saved = localStorage.getItem(STORAGE_KEY_ACTIVE);
+          return saved || "root";
+        });
         const [showPanel, setShowPanel] = useState(false);
         const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
         const [mergePreview, setMergePreview] = useState(null);
@@ -1833,21 +2055,31 @@
         const [isLoading, setIsLoading] = useState(false);
         const [error, setError] = useState(null);
 
-        // Pending auto-send for forked nodes
-        const [pendingSend, setPendingSend] = useState(null);
+        // Pending auto-send queue for forked nodes (supports multiple concurrent forks)
+        const [pendingSendQueue, setPendingSendQueue] = useState([]);
         const handleSendRef = useRef(null);
+        const processingSendRef = useRef(false);
 
-        // Effect to handle pending auto-sends when node becomes available
+        // Effect to handle pending auto-sends when nodes become available
         useEffect(() => {
-          if (pendingSend && nodes[pendingSend.id]) {
-            const { id, text } = pendingSend;
-            setPendingSend(null);
-            // Small delay to ensure state is fully settled
-            setTimeout(() => {
-              handleSendRef.current(id, text);
-            }, 50);
-          }
-        }, [pendingSend, nodes]);
+          if (pendingSendQueue.length === 0 || processingSendRef.current) return;
+
+          // Find first pending send where node exists
+          const readyIndex = pendingSendQueue.findIndex(item => nodes[item.id]);
+          if (readyIndex === -1) return;
+
+          const item = pendingSendQueue[readyIndex];
+          processingSendRef.current = true;
+
+          // Remove from queue
+          setPendingSendQueue(prev => prev.filter((_, i) => i !== readyIndex));
+
+          // Small delay to ensure state is fully settled
+          setTimeout(() => {
+            handleSendRef.current(item.id, item.text);
+            processingSendRef.current = false;
+          }, 50);
+        }, [pendingSendQueue, nodes]);
 
         // Auto-dismiss error after 8 seconds
         useEffect(() => {
@@ -1856,6 +2088,16 @@
             return () => clearTimeout(timer);
           }
         }, [error]);
+
+        // Save nodes to localStorage when they change (debounced)
+        useEffect(() => {
+          saveNodesToStorage(nodes);
+        }, [nodes]);
+
+        // Save activeId to localStorage
+        useEffect(() => {
+          localStorage.setItem(STORAGE_KEY_ACTIVE, activeId);
+        }, [activeId]);
 
         // Build enriched tree (supports multiple top-level threads)
         const trees = useMemo(() => {
@@ -1961,18 +2203,25 @@
 
         // Message handlers
         const addMessages = (id, newMessages) => {
-          setNodes((prev) => ({
-            ...prev,
-            [id]: {
-              ...prev[id],
-              messages: [...prev[id].messages, ...newMessages],
-            },
-          }));
+          setNodes((prev) => {
+            if (!prev[id]) {
+              console.error("[addMessages] Node not found:", id);
+              return prev;
+            }
+            return {
+              ...prev,
+              [id]: {
+                ...prev[id],
+                messages: [...prev[id].messages, ...newMessages],
+              },
+            };
+          });
         };
 
         const simulateAssistant = (question, fromId) => {
           const parent = nodes[fromId];
-          const context = parent.messages
+          if (!parent) return `Here's a thoughtful exploration of "${question}".`;
+          const context = (parent.messages || [])
             .slice(-3)
             .map((m) => `${m.role}: ${m.text}`)
             .join(" | ");
@@ -1980,6 +2229,14 @@
         };
 
         const handleSend = async (id, text) => {
+          // Guard: check node exists
+          const node = nodes[id];
+          if (!node) {
+            console.error("[handleSend] Node not found:", id);
+            setError("Node not found. Please try again.");
+            return;
+          }
+
           if (!apiKey) {
             addMessages(id, [
               { role: "user", text },
@@ -1991,7 +2248,6 @@
 
           // IMPORTANT: Capture current node state BEFORE any state updates
           // React state updates are async, so we need to read messages first
-          const node = nodes[id];
           const conversationHistory = [...node.messages, { role: "user", text }];
           const depth = nodesById[id]?.depth || 0;
           const expertiseLevel = node.expertiseLevel;
@@ -2019,6 +2275,12 @@
               : isTopLevel && isFirstMessage
                 ? `This is the start of a new topic. Gauge their familiarity level before diving deep.`
                 : '';
+
+            const prereqContext = node.prereqAssessment
+              ? `\n## User's Prerequisite Knowledge Assessment:\n${Object.entries(node.prereqAssessment)
+                  .map(([concept, level]) => `- ${concept}: Level ${level}/3 (0=no idea, 1=surface, 2=working, 3=deep)`)
+                  .join('\n')}\n\nTailor your explanation: For level 0, explain the prerequisite from scratch. Fill gaps for level 1-2 concepts. Skip basics for level 3 concepts.`
+              : '';
 
             const depthContext = depth > 0
               ? `Current exploration depth: ${depth}. The user has branched ${depth} level(s) deep into subtopics.`
@@ -2054,33 +2316,70 @@ ${depth > 2 ? `- User is ${depth} levels deep - they're clearly interested in de
 - Can give more thorough explanations
 - 2-3 very specific branch suggestions` : ''}
 
+${isFirstMessage && isTopLevel && !node.prereqAssessment ? `## ⚠️ FIRST MESSAGE - ASSESS PREREQUISITES FIRST
+This is the user's FIRST message in a new exploration. Before explaining the topic, check if prerequisites would help.
+
+**If the topic has significant foundational concepts** (e.g., RDMA, Kubernetes, distributed systems, ML architectures):
+- Output ONLY a \`prereqs\` block - nothing else
+- Do NOT include any explanation or text before/after the prereqs block
+- The UI will show the prereqs as interactive cards for the user to click
+- After they complete the assessment, you'll receive their levels and can give a tailored response
+
+**If the topic is simple or standalone** (e.g., "what is Python", "explain loops"):
+- Skip the prereqs block entirely and respond normally with an explanation
+
+Example of a prereqs-only response for "RDMA":
+\`\`\`prereqs
+{"topic":"RDMA","concepts":[{"name":"Operating System Kernels","importance":"critical","levels":[{"level":1,"statement":"I know the kernel manages hardware"},{"level":2,"statement":"I understand user vs kernel space"},{"level":3,"statement":"I can explain memory mapping and DMA"}]}],"tooMany":false}
+\`\`\`` : ''}
+
 ${expertiseContext}
+${prereqContext}
 ${immediateContextSection}
 ${parentContextSection}
 
 ## Visual Explanations with Diagrams:
-When explaining concepts with relationships, hierarchies, flows, or dependencies, USE MERMAID DIAGRAMS:
-- **flowchart**: For processes, decisions, or cause-effect relationships
-- **graph**: For concept maps showing how ideas connect
-- **sequenceDiagram**: For interactions or step-by-step processes
-- **classDiagram**: For hierarchies, inheritance, or type relationships
+When explaining concepts, USE MERMAID DIAGRAMS liberally. Choose the right type:
 
-Example usage:
+**For relationships & flows:**
+- **flowchart/graph**: Concept maps, cause-effect, decision trees
+- **sequenceDiagram**: Interactions, step-by-step processes
+- **classDiagram**: Hierarchies, inheritance, type relationships
+
+**For time-based content:**
+- **timeline**: Historical events, milestones, eras (GREAT for history!)
+- **gantt**: Overlapping periods, project schedules, concurrent events
+
+**For states & journeys:**
+- **stateDiagram**: Lifecycles, state machines, status progressions
+- **journey**: User experiences, emotional arcs, process satisfaction
+
+Example timeline for history:
 \`\`\`mermaid
-graph TD
-    A[Main Concept] --> B[Sub-concept 1]
-    A --> C[Sub-concept 2]
-    B --> D[Detail]
+timeline
+    title Roman History
+    section Republic
+        509 BCE : Republic founded
+        264 BCE : First Punic War
+    section Crisis
+        133 BCE : Gracchi reforms
+        49 BCE : Caesar crosses Rubicon
+    section Empire
+        27 BCE : Augustus becomes Emperor
 \`\`\`
 
-Use diagrams when they help visualize:
-- How components relate to each other
-- Decision trees or conditional logic
-- Timelines or sequences of events
-- Hierarchies (like taxonomies, org structures, inheritance)
-- Data flow or architecture
+Example gantt for overlapping periods:
+\`\`\`mermaid
+gantt
+    title Roman Periods
+    dateFormat YYYY
+    section Eras
+    Kingdom     :0753, 0244
+    Republic    :0509, 0482
+    Empire      :0027, 0476
+\`\`\`
 
-Keep diagrams simple - 4-8 nodes max. You can always suggest branching into a subtopic for more detail.
+Keep diagrams focused - split into multiple diagrams if needed. Suggest branching for more detail.
 
 ## Data Visualization with Charts:
 When showing numerical data, comparisons, or trends, use chart blocks:
@@ -2129,6 +2428,48 @@ When teaching definitions, terms, or Q&A pairs, use flashcard decks:
 
 Use 3-6 cards per deck. Great for vocabulary, definitions, or testing understanding.
 
+## Prerequisite Assessment Format:
+For complex topics, output a prereqs block to gauge the user's background. Here's the exact format with a real example:
+
+\`\`\`prereqs
+{
+  "topic": "RDMA",
+  "concepts": [
+    {
+      "name": "Operating System Kernels",
+      "importance": "critical",
+      "levels": [
+        { "level": 1, "statement": "I know the kernel is the core of an operating system" },
+        { "level": 2, "statement": "I understand user space vs kernel space and system calls" },
+        { "level": 3, "statement": "I can explain memory mapping, DMA buffers, and kernel modules" }
+      ]
+    },
+    {
+      "name": "Network Stack Basics",
+      "importance": "high",
+      "levels": [
+        { "level": 1, "statement": "I know data travels through layers (TCP/IP)" },
+        { "level": 2, "statement": "I understand socket programming and network drivers" },
+        { "level": 3, "statement": "I can explain NIC hardware, interrupts, and zero-copy techniques" }
+      ]
+    }
+  ],
+  "tooMany": false
+}
+\`\`\`
+
+**IMPORTANT:** Output the prereqs block FIRST, then follow with a brief intro paragraph. The UI will render interactive buttons for users to click their level.
+
+Guidelines:
+- Only use this for COMPLEX topics with real prerequisites (not for simple questions like "what is Python")
+- Include 2-5 prerequisite concepts that would genuinely help understand the main topic
+- Each level should be a statement the user can agree with to indicate their knowledge
+- Level 0 = no idea (user will select this themselves - you don't need to include it)
+- Level 1 = surface awareness ("I know X exists"), Level 2 = working knowledge ("I understand how X works"), Level 3 = deep expertise ("I can explain X in detail")
+- Set "importance" to "critical" (must know), "high" (very helpful), or "medium" (nice to have)
+- If there are 10+ prerequisites, set "tooMany": true to suggest the user fork to learn fundamentals first
+- After the user selects their levels, their assessment will be included in subsequent messages
+
 ## Response Style:
 - **Concise over comprehensive** - they can always branch for more
 - Make terms and concepts INTERESTING so users want to click and explore them
@@ -2137,7 +2478,7 @@ Use 3-6 cards per deck. Great for vocabulary, definitions, or testing understand
 - Include a diagram when it would clarify relationships
 - NO clarifying questions like "what do you want to focus on?" - just provide content and branches
 
-## IMPORTANT - End every response with this JSON block:
+## IMPORTANT - End every response with this JSON block (EXCEPT prereqs-only responses):
 
 \`\`\`suggestions
 {
@@ -2146,6 +2487,8 @@ Use 3-6 cards per deck. Great for vocabulary, definitions, or testing understand
   "quick_answers": ["Tell me more", "How does this work?", "Why does this matter?"]
 }
 \`\`\`
+
+**Note:** If you're outputting ONLY a prereqs block (no explanation), do NOT include a suggestions block.
 
 - **title**: Concise title (3-5 words) capturing the topic. Update as focus becomes clearer.
 - **branches**: ${depth === 0 ? '4-5' : depth <= 2 ? '3-4' : '2-3'} interesting subtopics to explore. Make them SPECIFIC and INTRIGUING - not generic. These become clickable fork buttons.
@@ -2163,6 +2506,7 @@ Topic: "${node.title}"`;
                 // Update the streaming message with partial text
                 setNodes(prev => {
                   const currentNode = prev[id];
+                  if (!currentNode) return prev;
                   const messages = [...currentNode.messages];
                   const lastMsg = messages[messages.length - 1];
                   if (lastMsg && lastMsg.isStreaming) {
@@ -2179,19 +2523,27 @@ Topic: "${node.title}"`;
               }
             );
 
-            // Parse the final response to extract suggestions
-            const { cleanText, suggestions } = parseAIResponse(fullResponse);
+            // Parse the final response to extract suggestions and prereqs
+            const { cleanText, suggestions, prereqs } = parseAIResponse(fullResponse);
 
-            // Finalize the message with parsed content and suggestions
+            // For prereqs-only responses, add placeholder text so it appears in conversation history
+            const finalText = cleanText || (prereqs ? "[Assessing your background knowledge...]" : "");
+
+            // Finalize the message with parsed content, suggestions, and prereqs
             setNodes(prev => {
               const currentNode = prev[id];
+              if (!currentNode) {
+                console.error("[handleSend] Node not found during finalization:", id);
+                return prev;
+              }
               const messages = [...currentNode.messages];
               const lastMsg = messages[messages.length - 1];
               if (lastMsg && lastMsg.isStreaming) {
                 messages[messages.length - 1] = {
                   role: "assistant",
-                  text: cleanText,
+                  text: finalText,
                   suggestions: suggestions,
+                  prereqs: prereqs,
                   isStreaming: false
                 };
               }
@@ -2207,16 +2559,20 @@ Topic: "${node.title}"`;
 
           } catch (err) {
             console.error("API Error:", err);
-            setError(err.message);
+            setError(err.message || "An error occurred. Please try again.");
             // Update the streaming message with error
             setNodes(prev => {
               const currentNode = prev[id];
+              if (!currentNode) {
+                console.error("[handleSend] Node not found during error handling:", id);
+                return prev;
+              }
               const messages = [...currentNode.messages];
               const lastMsg = messages[messages.length - 1];
               if (lastMsg && lastMsg.isStreaming) {
                 messages[messages.length - 1] = {
                   role: "assistant",
-                  text: `Error: ${err.message}\n\nPlease check your API key in Settings.`,
+                  text: `Error: ${err.message || "Unknown error"}\n\nPlease try again or check your API key in Settings.`,
                   isStreaming: false
                 };
               }
@@ -2243,6 +2599,7 @@ Topic: "${node.title}"`;
 
         // Compress parent thread context for passing to child fork
         const compressContext = (node) => {
+          if (!node || !node.messages) return '';
           const msgs = node.messages.filter(m => m.role !== 'system');
           if (msgs.length === 0) return '';
 
@@ -2266,8 +2623,13 @@ Topic: "${node.title}"`;
 
         const handleFork = async (fromId, explicitSelection, autoSend = false, immediateContext = null) => {
           const base = nodes[fromId];
+          if (!base) {
+            console.error("[handleFork] Base node not found:", fromId);
+            setError("Could not create fork. Please try again.");
+            return;
+          }
           const picked = (explicitSelection && explicitSelection.trim()) || selectionText();
-          const contextSnippet = picked || base.messages.slice(-1).map((m) => m.text).join(" ").slice(0, 50);
+          const contextSnippet = picked || (base.messages?.slice(-1).map((m) => m.text).join(" ").slice(0, 50) || "new topic");
           const id = `node-${Date.now()}-${Math.round(Math.random() * 9999)}`;
 
           // Compress context from parent for the fork
@@ -2294,10 +2656,10 @@ Topic: "${node.title}"`;
           setActiveId(id);
           setShowPanel(true);
 
-          // If autoSend, queue up the send for when node is available
+          // If autoSend, add to queue for when node is available
           // Just send the topic - the context is already in the system prompt via immediateContext
           if (autoSend && picked) {
-            setPendingSend({ id, text: picked });
+            setPendingSendQueue(prev => [...prev, { id, text: picked }]);
           }
         };
 
@@ -2362,8 +2724,100 @@ Topic: "${node.title}"`;
           }));
         };
 
+        // Delete a node and all its children
+        const handleDeleteNode = (nodeId) => {
+          // Don't delete if it's the only top-level node
+          const topLevelNodes = Object.values(nodes).filter(n => n.parentId === null);
+          const nodeToDelete = nodes[nodeId];
+          if (!nodeToDelete) return;
+
+          if (nodeToDelete.parentId === null && topLevelNodes.length <= 1) {
+            setError("Cannot delete the last thread. Create a new one first.");
+            return;
+          }
+
+          // Find all descendants recursively
+          const getDescendants = (id) => {
+            const children = Object.values(nodes).filter(n => n.parentId === id);
+            return children.flatMap(child => [child.id, ...getDescendants(child.id)]);
+          };
+
+          const toDelete = [nodeId, ...getDescendants(nodeId)];
+          console.log("[Delete] Removing nodes:", toDelete);
+
+          setNodes(prev => {
+            const updated = { ...prev };
+            toDelete.forEach(id => delete updated[id]);
+            return updated;
+          });
+
+          // If we deleted the active node, switch to parent or first available
+          if (toDelete.includes(activeId)) {
+            const newActive = nodeToDelete.parentId ||
+              Object.keys(nodes).find(id => !toDelete.includes(id)) ||
+              "root";
+            setActiveId(newActive);
+          }
+
+          setShowPanel(false);
+        };
+
+        // Clear all data and start fresh
+        const handleClearAll = () => {
+          if (!confirm("Are you sure you want to delete ALL threads and start fresh?")) return;
+
+          localStorage.removeItem(STORAGE_KEY_NODES);
+          localStorage.removeItem(STORAGE_KEY_ACTIVE);
+
+          const freshNodes = {
+            root: createNode({
+              id: "root",
+              title: "Main Thread",
+              messages: initialRootMessages,
+              parentId: null
+            }),
+          };
+          setNodes(freshNodes);
+          setActiveId("root");
+          setShowPanel(false);
+        };
+
+        const handleSetPrereqAssessment = (nodeId, assessment) => {
+          // First, update the node with the assessment
+          setNodes(prev => {
+            const node = prev[nodeId];
+            if (!node) {
+              console.error("[handleSetPrereqAssessment] Node not found:", nodeId);
+              return prev;
+            }
+
+            // Update the node
+            const updatedNodes = {
+              ...prev,
+              [nodeId]: {
+                ...prev[nodeId],
+                prereqAssessment: assessment,
+              }
+            };
+
+            // Trigger a follow-up response after state update
+            setTimeout(() => {
+              // Send a continuation prompt - the AI will see the prereq assessment in context
+              if (handleSendRef.current) {
+                handleSendRef.current(nodeId, "Continue with my assessment.");
+              }
+            }, 100);
+
+            return updatedNodes;
+          });
+        };
+
         const handleCloseWithMerge = (id) => {
           const node = nodes[id];
+          if (!node) {
+            console.error("[handleCloseWithMerge] Node not found:", id);
+            return;
+          }
           const targetId = node.parentId || 'root';
           setMergePreview({ sourceId: id, targetId });
         };
@@ -2431,6 +2885,7 @@ Topic: "${node.title}"`;
               hasApiKey={!!apiKey}
               collapsed={sidebarCollapsed}
               onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+              onClearAll={handleClearAll}
             />
 
             <div className="main-area">
@@ -2452,10 +2907,12 @@ Topic: "${node.title}"`;
                   onFork={handleFork}
                   onToggleFoundation={handleToggleFoundation}
                   onCloseWithMerge={handleCloseWithMerge}
+                  onDelete={handleDeleteNode}
                   lineage={lineage}
                   onJump={selectNode}
                   isLoading={isLoading}
                   onSetExpertise={handleSetExpertise}
+                  onSetPrereqAssessment={handleSetPrereqAssessment}
                 />
               )}
             </div>
