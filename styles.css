@@ -1581,9 +1581,15 @@ textarea:disabled {
 
 .prereq-header {
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
+  flex-direction: column;
+  gap: 12px;
   margin-bottom: 16px;
+}
+
+.prereq-header-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .prereq-icon {
@@ -1592,6 +1598,7 @@ textarea:disabled {
 }
 
 .prereq-title {
+  flex: 1;
   font-size: var(--font-size-base);
   color: var(--text-primary);
   line-height: 1.4;
@@ -1599,6 +1606,52 @@ textarea:disabled {
 
 .prereq-title strong {
   color: var(--accent-cyan);
+}
+
+.prereq-skip-btn {
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.prereq-skip-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-medium);
+  color: var(--text-secondary);
+}
+
+.prereq-progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.prereq-progress-bar {
+  flex: 1;
+  height: 4px;
+  background: var(--bg-main);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.prereq-progress-fill {
+  height: 100%;
+  background: var(--accent-exploring);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.prereq-progress-text {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  white-space: nowrap;
 }
 
 .prereq-warning {
@@ -1768,29 +1821,69 @@ textarea:disabled {
   color: var(--accent-exploring);
 }
 
-.prereq-continue-btn {
-  width: 100%;
-  padding: 12px 16px;
+.prereq-nav {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.prereq-nav-btn {
+  flex: 1;
+  padding: 10px 16px;
   background: var(--bg-hover);
   border: 1px solid var(--border-dim);
   border-radius: 4px;
   color: var(--text-muted);
   font-family: var(--font-mono);
   font-size: var(--font-size-sm);
-  cursor: not-allowed;
+  cursor: pointer;
   transition: all 0.15s ease;
 }
 
-.prereq-continue-btn.ready {
+.prereq-nav-btn:hover:not(:disabled) {
+  background: var(--bg-surface);
+  border-color: var(--border-medium);
+  color: var(--text-secondary);
+}
+
+.prereq-nav-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.prereq-nav-btn.back {
+  flex: 0.5;
+}
+
+.prereq-nav-btn.next {
+  flex: 1;
+}
+
+.prereq-nav-btn.next.ready {
   background: var(--accent-exploring);
   border-color: var(--accent-exploring);
   color: var(--bg-deep);
-  cursor: pointer;
   font-weight: 600;
 }
 
-.prereq-continue-btn.ready:hover {
+.prereq-nav-btn.next.ready:hover {
   filter: brightness(1.1);
+}
+
+/* Card animation for step transitions */
+.prereq-card.active {
+  animation: slideIn 0.2s ease;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 /* ============================================

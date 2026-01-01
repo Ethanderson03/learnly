@@ -1333,6 +1333,7 @@
                       prereqs={msg.prereqs}
                       onComplete={(results) => onSetPrereqAssessment(nodeId, results)}
                       onForkPrereq={(concept) => onFork(concept, true)}
+                      onSkip={() => onSetPrereqAssessment(nodeId, { _skipped: true })}
                     />
                   )}
 
@@ -1443,34 +1444,72 @@
       // ============================================
       // UI COMPONENTS - Prerequisite Assessment
       // ============================================
-      function PrereqAssessment({ prereqs, onComplete, onForkPrereq }) {
+      function PrereqAssessment({ prereqs, onComplete, onForkPrereq, onSkip }) {
         const [selections, setSelections] = useState({});
+        const [currentIndex, setCurrentIndex] = useState(0);
 
         if (!prereqs || !prereqs.concepts) return null;
 
         const { topic, concepts, tooMany } = prereqs;
-        const allSelected = concepts.every(c => selections[c.name] !== undefined);
+        const currentConcept = concepts[currentIndex];
+        const isLastConcept = currentIndex === concepts.length - 1;
+        const currentSelection = selections[currentConcept?.name];
 
-        const handleSelect = (conceptName, level) => {
+        const handleSelect = (level) => {
+          const conceptName = currentConcept.name;
           setSelections(prev => ({ ...prev, [conceptName]: level }));
+
+          // Auto-advance after short delay
+          setTimeout(() => {
+            if (currentIndex < concepts.length - 1) {
+              setCurrentIndex(prev => prev + 1);
+            }
+          }, 300);
+        };
+
+        const handleBack = () => {
+          if (currentIndex > 0) {
+            setCurrentIndex(prev => prev - 1);
+          }
         };
 
         const handleContinue = () => {
-          if (allSelected) {
+          if (currentSelection !== undefined && isLastConcept) {
             onComplete(selections);
+          } else if (currentSelection !== undefined) {
+            setCurrentIndex(prev => prev + 1);
           }
+        };
+
+        const handleSkip = () => {
+          // Skip with empty assessment - AI will assume no prereq info
+          onSkip ? onSkip() : onComplete({});
         };
 
         return (
           <div className="prereq-assessment">
             <div className="prereq-header">
-              <span className="prereq-icon">🎯</span>
-              <span className="prereq-title">
-                Before diving into <strong>{topic}</strong>, let's gauge your background
-              </span>
+              <div className="prereq-header-top">
+                <span className="prereq-icon">🎯</span>
+                <span className="prereq-title">
+                  Before diving into <strong>{topic}</strong>
+                </span>
+                <button className="prereq-skip-btn" onClick={handleSkip}>
+                  Skip →
+                </button>
+              </div>
+              <div className="prereq-progress">
+                <div className="prereq-progress-bar">
+                  <div
+                    className="prereq-progress-fill"
+                    style={{ width: `${((currentIndex + (currentSelection !== undefined ? 1 : 0)) / concepts.length) * 100}%` }}
+                  />
+                </div>
+                <span className="prereq-progress-text">{currentIndex + 1} of {concepts.length}</span>
+              </div>
             </div>
 
-            {tooMany && (
+            {tooMany && currentIndex === 0 && (
               <div className="prereq-warning">
                 <span className="warning-icon">⚠️</span>
                 This topic has many prerequisites. Consider exploring foundational concepts first.
@@ -1478,56 +1517,63 @@
             )}
 
             <div className="prereq-concepts">
-              {concepts.map((concept) => (
-                <div key={concept.name} className="prereq-card">
-                  <div className="prereq-concept-header">
-                    <span className="concept-name">{concept.name}</span>
-                    {concept.importance === 'critical' && (
-                      <span className="importance-badge critical">Critical</span>
-                    )}
-                    {concept.importance === 'high' && (
-                      <span className="importance-badge high">Important</span>
-                    )}
-                  </div>
-                  <div className="prereq-statements">
-                    {/* Level 0 - hardcoded "no idea" option */}
-                    <button
-                      className={`prereq-statement level-zero ${selections[concept.name] === 0 ? 'selected' : ''}`}
-                      onClick={() => handleSelect(concept.name, 0)}
-                    >
-                      <span className="statement-level">L0</span>
-                      <span className="statement-text">I have no idea what this is</span>
-                    </button>
-                    {concept.levels.map((lvl) => (
-                      <button
-                        key={lvl.level}
-                        className={`prereq-statement ${selections[concept.name] === lvl.level ? 'selected' : ''}`}
-                        onClick={() => handleSelect(concept.name, lvl.level)}
-                      >
-                        <span className="statement-level">L{lvl.level}</span>
-                        <span className="statement-text">{lvl.statement}</span>
-                      </button>
-                    ))}
-                  </div>
-                  {tooMany && (
-                    <button
-                      className="prereq-fork-btn"
-                      onClick={() => onForkPrereq(concept.name)}
-                    >
-                      ↳ Learn {concept.name} first
-                    </button>
+              <div className="prereq-card active">
+                <div className="prereq-concept-header">
+                  <span className="concept-name">{currentConcept.name}</span>
+                  {currentConcept.importance === 'critical' && (
+                    <span className="importance-badge critical">Critical</span>
+                  )}
+                  {currentConcept.importance === 'high' && (
+                    <span className="importance-badge high">Important</span>
                   )}
                 </div>
-              ))}
+                <div className="prereq-statements">
+                  {/* Level 0 - hardcoded "no idea" option */}
+                  <button
+                    className={`prereq-statement level-zero ${currentSelection === 0 ? 'selected' : ''}`}
+                    onClick={() => handleSelect(0)}
+                  >
+                    <span className="statement-level">L0</span>
+                    <span className="statement-text">I have no idea what this is</span>
+                  </button>
+                  {currentConcept.levels.map((lvl) => (
+                    <button
+                      key={lvl.level}
+                      className={`prereq-statement ${currentSelection === lvl.level ? 'selected' : ''}`}
+                      onClick={() => handleSelect(lvl.level)}
+                    >
+                      <span className="statement-level">L{lvl.level}</span>
+                      <span className="statement-text">{lvl.statement}</span>
+                    </button>
+                  ))}
+                </div>
+                {tooMany && (
+                  <button
+                    className="prereq-fork-btn"
+                    onClick={() => onForkPrereq(currentConcept.name)}
+                  >
+                    ↳ Learn {currentConcept.name} first
+                  </button>
+                )}
+              </div>
             </div>
 
-            <button
-              className={`prereq-continue-btn ${allSelected ? 'ready' : ''}`}
-              onClick={handleContinue}
-              disabled={!allSelected}
-            >
-              {allSelected ? 'Continue with explanation →' : `Select your level for each concept (${Object.keys(selections).length}/${concepts.length})`}
-            </button>
+            <div className="prereq-nav">
+              <button
+                className="prereq-nav-btn back"
+                onClick={handleBack}
+                disabled={currentIndex === 0}
+              >
+                ← Back
+              </button>
+              <button
+                className={`prereq-nav-btn next ${currentSelection !== undefined ? 'ready' : ''}`}
+                onClick={handleContinue}
+                disabled={currentSelection === undefined}
+              >
+                {isLastConcept ? 'Continue →' : 'Next →'}
+              </button>
+            </div>
           </div>
         );
       }
@@ -2359,9 +2405,12 @@
                 : '';
 
             const prereqContext = node.prereqAssessment
-              ? `\n## User's Prerequisite Knowledge Assessment:\n${Object.entries(node.prereqAssessment)
-                  .map(([concept, level]) => `- ${concept}: Level ${level}/3 (0=no idea, 1=surface, 2=working, 3=deep)`)
-                  .join('\n')}\n\nTailor your explanation: For level 0, explain the prerequisite from scratch. Fill gaps for level 1-2 concepts. Skip basics for level 3 concepts.`
+              ? (node.prereqAssessment._skipped
+                  ? '\n## User skipped prerequisite assessment - assume intermediate knowledge and explain concepts as needed.'
+                  : `\n## User's Prerequisite Knowledge Assessment:\n${Object.entries(node.prereqAssessment)
+                      .filter(([key]) => key !== '_skipped')
+                      .map(([concept, level]) => `- ${concept}: Level ${level}/3 (0=no idea, 1=surface, 2=working, 3=deep)`)
+                      .join('\n')}\n\nTailor your explanation: For level 0, explain the prerequisite from scratch. Fill gaps for level 1-2 concepts. Skip basics for level 3 concepts.`)
               : '';
 
             const depthContext = depth > 0
@@ -2540,16 +2589,20 @@ For complex topics, output a prereqs block to gauge the user's background. Here'
 }
 \`\`\`
 
-**IMPORTANT:** Output the prereqs block FIRST, then follow with a brief intro paragraph. The UI will render interactive buttons for users to click their level.
+**IMPORTANT:** Output the prereqs block FIRST, then follow with a brief intro paragraph. The UI will render interactive cards that cycle through each prereq one at a time.
 
 Guidelines:
 - Only use this for COMPLEX topics with real prerequisites (not for simple questions like "what is Python")
-- Include 2-5 prerequisite concepts that would genuinely help understand the main topic
+- Include AS MANY OR AS FEW prerequisites as the topic ACTUALLY requires - don't artificially limit to a fixed number
+  - A deeply technical topic like "RDMA internals" might need 6-8 prereqs
+  - A moderately complex topic like "Docker basics" might need 2-3 prereqs
+  - A conceptual topic like "what is machine learning" might need just 1 prereq or none at all
 - Each level should be a statement the user can agree with to indicate their knowledge
 - Level 0 = no idea (user will select this themselves - you don't need to include it)
 - Level 1 = surface awareness ("I know X exists"), Level 2 = working knowledge ("I understand how X works"), Level 3 = deep expertise ("I can explain X in detail")
 - Set "importance" to "critical" (must know), "high" (very helpful), or "medium" (nice to have)
 - If there are 10+ prerequisites, set "tooMany": true to suggest the user fork to learn fundamentals first
+- The user can skip the assessment entirely if they prefer - that's okay
 - After the user selects their levels, their assessment will be included in subsequent messages
 
 ## Response Style:
