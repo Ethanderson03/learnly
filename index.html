@@ -24,28 +24,110 @@
     <script type="text/babel">
       const { useEffect, useState, useMemo, useRef, useCallback } = React;
 
-      // Initialize Mermaid with dark theme
+      // Initialize Mermaid with dark theme - comprehensive settings for all diagram types
       mermaid.initialize({
         startOnLoad: false,
         theme: 'dark',
         themeVariables: {
+          // Core colors
           primaryColor: '#4a9eff',
-          primaryTextColor: '#e8e8e8',
+          primaryTextColor: '#f0f0f0',
           primaryBorderColor: '#4a9eff',
           lineColor: '#888888',
-          secondaryColor: '#1a1a1a',
-          tertiaryColor: '#222222',
+          secondaryColor: '#2a2a2a',
+          tertiaryColor: '#333333',
           background: '#111111',
-          mainBkg: '#1a1a1a',
+          mainBkg: '#1e1e1e',
           nodeBorder: '#4a9eff',
           clusterBkg: '#222222',
-          clusterBorder: '#333333',
-          titleColor: '#e8e8e8',
+          clusterBorder: '#444444',
+          titleColor: '#f0f0f0',
           edgeLabelBackground: '#1a1a1a',
+
+          // Text colors - ensure high contrast
+          textColor: '#f0f0f0',
+          nodeTextColor: '#f0f0f0',
+          labelTextColor: '#f0f0f0',
+
+          // Sequence diagram
+          actorTextColor: '#f0f0f0',
+          actorBkg: '#2a2a2a',
+          actorBorder: '#4a9eff',
+          actorLineColor: '#666666',
+          signalColor: '#f0f0f0',
+          signalTextColor: '#f0f0f0',
+          labelBoxBkgColor: '#2a2a2a',
+          labelBoxBorderColor: '#4a9eff',
+          noteBkgColor: '#333333',
+          noteTextColor: '#f0f0f0',
+          noteBorderColor: '#555555',
+          activationBkgColor: '#3a3a3a',
+          activationBorderColor: '#4a9eff',
+          sequenceNumberColor: '#f0f0f0',
+
+          // Gantt chart
+          sectionBkgColor: '#2a2a2a',
+          sectionBkgColor2: '#333333',
+          gridColor: '#444444',
+          todayLineColor: '#4a9eff',
+          taskTextColor: '#f0f0f0',
+          taskTextOutsideColor: '#f0f0f0',
+          taskTextLightColor: '#f0f0f0',
+          taskTextDarkColor: '#1a1a1a',
+          taskBkgColor: '#4a9eff',
+          activeTaskBkgColor: '#5ab0ff',
+          doneTaskBkgColor: '#2d7a4d',
+          critBkgColor: '#a04040',
+          taskBorderColor: '#555555',
+
+          // State diagram
+          labelColor: '#f0f0f0',
+          altBackground: '#2a2a2a',
+
+          // Journey diagram
+          fillType0: '#2a4a6a',
+          fillType1: '#3a5a7a',
+          fillType2: '#4a6a8a',
+          fillType3: '#5a7a9a',
+          fillType4: '#3a6a5a',
+          fillType5: '#4a7a6a',
+          fillType6: '#5a8a7a',
+          fillType7: '#6a9a8a',
+
+          // Pie chart
+          pie1: '#4a9eff',
+          pie2: '#5ab8a0',
+          pie3: '#e8a060',
+          pie4: '#d070a0',
+          pie5: '#8070d0',
+          pie6: '#60c0c0',
+          pie7: '#c0a060',
+          pieTitleTextColor: '#f0f0f0',
+          pieSectionTextColor: '#f0f0f0',
+          pieLegendTextColor: '#f0f0f0',
+          pieStrokeColor: '#333333',
+
+          // Timeline
+          cScale0: '#4a9eff',
+          cScale1: '#5ab8a0',
+          cScale2: '#e8a060',
+          cScale3: '#d070a0',
+          cScale4: '#8070d0',
+          cScale5: '#60c0c0',
+          cScaleLabel0: '#f0f0f0',
+          cScaleLabel1: '#f0f0f0',
+          cScaleLabel2: '#1a1a1a',
+          cScaleLabel3: '#f0f0f0',
+          cScaleLabel4: '#f0f0f0',
+          cScaleLabel5: '#1a1a1a',
         },
         flowchart: {
           curve: 'basis',
           padding: 15,
+        },
+        sequence: {
+          mirrorActors: false,
+          bottomMarginAdj: 10,
         },
         fontFamily: 'JetBrains Mono, monospace',
       });

@@ -1989,6 +1989,99 @@ textarea:disabled {
   display: none;
 }
 
+/* Mermaid text contrast overrides - ensure all text is readable */
+.mermaid-diagram text,
+.mermaid-diagram .nodeLabel,
+.mermaid-diagram .label,
+.mermaid-diagram .edgeLabel,
+.mermaid-diagram .labelText,
+.mermaid-diagram .legend text,
+.mermaid-diagram .slice text,
+.mermaid-diagram .taskText,
+.mermaid-diagram .taskTextOutsideRight,
+.mermaid-diagram .taskTextOutsideLeft,
+.mermaid-diagram .sectionTitle,
+.mermaid-diagram .titleText,
+.mermaid-diagram tspan {
+  fill: #f0f0f0 !important;
+  color: #f0f0f0 !important;
+}
+
+/* Gantt chart specific */
+.mermaid-diagram .section0,
+.mermaid-diagram .section1,
+.mermaid-diagram .section2,
+.mermaid-diagram .section3 {
+  fill: #2a2a2a !important;
+}
+
+.mermaid-diagram .grid .tick line {
+  stroke: #444 !important;
+}
+
+.mermaid-diagram .grid .tick text {
+  fill: #b0b0b0 !important;
+}
+
+/* Timeline specific */
+.mermaid-diagram .time-label text,
+.mermaid-diagram .period text,
+.mermaid-diagram .timeline-label text {
+  fill: #f0f0f0 !important;
+}
+
+/* Sequence diagram actors and labels */
+.mermaid-diagram .actor,
+.mermaid-diagram .actor-man {
+  fill: #2a2a2a !important;
+  stroke: #4a9eff !important;
+}
+
+.mermaid-diagram .actor text {
+  fill: #f0f0f0 !important;
+}
+
+.mermaid-diagram .messageText,
+.mermaid-diagram .loopText,
+.mermaid-diagram .noteText {
+  fill: #f0f0f0 !important;
+}
+
+/* State diagram */
+.mermaid-diagram .statediagram-state text,
+.mermaid-diagram .stateLabel text {
+  fill: #f0f0f0 !important;
+}
+
+/* Pie chart - ensure contrast on colored slices */
+.mermaid-diagram .pieTitleText {
+  fill: #f0f0f0 !important;
+}
+
+.mermaid-diagram .legend text {
+  fill: #d0d0d0 !important;
+}
+
+/* Journey diagram */
+.mermaid-diagram .journey-label text {
+  fill: #f0f0f0 !important;
+}
+
+/* Flowchart nodes - better backgrounds */
+.mermaid-diagram .node rect,
+.mermaid-diagram .node polygon,
+.mermaid-diagram .node circle,
+.mermaid-diagram .node ellipse {
+  fill: #2a2a2a !important;
+  stroke: #4a9eff !important;
+}
+
+/* Edge labels background */
+.mermaid-diagram .edgeLabel rect {
+  fill: #1a1a1a !important;
+  opacity: 0.9;
+}
+
 /* Mermaid expand button - overlaid on diagram */
 .mermaid-expand-btn {
   position: absolute;
