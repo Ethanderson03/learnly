@@ -16,6 +16,22 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Prism.js for syntax highlighting -->
+    <link href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-javascript.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-python.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-bash.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-json.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-typescript.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-jsx.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-css.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-sql.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-yaml.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-go.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-rust.min.js"></script>
+    <!-- Dagre for graph layout -->
+    <script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"></script>
   </head>
   <body>
     <div id="root"></div>
@@ -144,6 +160,7 @@
       const STORAGE_KEY_MODEL = "fork_model";
       const STORAGE_KEY_NODES = "fork_nodes";
       const STORAGE_KEY_ACTIVE = "fork_active_id";
+      const STORAGE_KEY_CONCEPTS = "fork_concept_graph";
 
       // Load saved nodes from localStorage
       const loadSavedNodes = () => {
@@ -335,6 +352,96 @@
       };
 
       // ============================================
+      // API HELPER - Concept Curation (Haiku)
+      // ============================================
+      const HAIKU_MODEL = "claude-3-5-haiku-20241022";
+
+      const curateConceptsWithAI = async (concepts, apiKey) => {
+        if (!apiKey || concepts.length === 0) return concepts.map(c => c.id);
+        if (concepts.length <= 8) return concepts.map(c => c.id); // No need to filter small sets
+
+        const conceptList = concepts
+          .map(c => `- "${c.name}" (mentioned ${c.count}x in ${c.sourceNodes.length} thread${c.sourceNodes.length > 1 ? 's' : ''})`)
+          .join('\n');
+
+        const prompt = `Given these concepts extracted from a learning conversation, select the 5-8 MOST important ones that represent core topics worth visualizing on a concept map. Be very selective - only pick the truly essential concepts.
+
+Prioritize:
+- Central topics that connect to many others
+- Foundational concepts that underpin the learning
+- Frequently mentioned concepts (higher count = more important)
+- Specific technical terms over generic words
+
+Skip:
+- Generic terms like "example", "process", "method", "system"
+- Very specific details that aren't core concepts
+- Terms that only appear once
+
+CONCEPTS:
+${conceptList}
+
+Respond with ONLY a JSON array of the selected concept names exactly as written above, nothing else. Example: ["Machine Learning", "Neural Networks"]`;
+
+        try {
+          const response = await fetch(API_ENDPOINT, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-API-Key": apiKey,
+            },
+            body: JSON.stringify({
+              messages: [{ role: "user", content: prompt }],
+              system: "You are a helpful assistant that selects the most important concepts. Respond only with valid JSON.",
+              model: HAIKU_MODEL,
+              max_tokens: 512,
+            }),
+          });
+
+          if (!response.ok) {
+            console.warn("[Curation] API error, showing all concepts");
+            return concepts.map(c => c.id);
+          }
+
+          // Read the streamed response
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let fullText = "";
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const chunk = decoder.decode(value, { stream: true });
+            for (const line of chunk.split('\n')) {
+              if (!line.startsWith('data: ')) continue;
+              const data = line.slice(6);
+              if (data === '[DONE]') continue;
+              try {
+                const parsed = JSON.parse(data);
+                if (parsed.type === "text") fullText += parsed.text;
+              } catch (e) { /* ignore parse errors */ }
+            }
+          }
+
+          // Parse the JSON response
+          const selectedNames = JSON.parse(fullText.trim());
+          if (!Array.isArray(selectedNames)) throw new Error("Not an array");
+
+          // Map names back to IDs
+          const selectedIds = concepts
+            .filter(c => selectedNames.some(name =>
+              name.toLowerCase() === c.name.toLowerCase()
+            ))
+            .map(c => c.id);
+
+          console.log("[Curation] AI selected", selectedIds.length, "of", concepts.length, "concepts");
+          return selectedIds.length > 0 ? selectedIds : concepts.map(c => c.id);
+        } catch (e) {
+          console.warn("[Curation] Failed to curate:", e.message);
+          return concepts.map(c => c.id);
+        }
+      };
+
+      // ============================================
       // DATA MODELS
       // ============================================
       const createNode = ({
@@ -451,12 +558,161 @@
         return { cleanText, suggestions, prereqs };
       };
 
+      // ============================================
+      // CONCEPT EXTRACTION
+      // ============================================
+      const slugify = (text) => {
+        return text.toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-|-$/g, '');
+      };
+
+      const extractConceptsFromText = (text) => {
+        if (!text) return [];
+
+        // Match bold terms: **term** or __term__
+        const boldRegex = /\*\*(.+?)\*\*|__(.+?)__/g;
+        const concepts = [];
+        const seen = new Set();
+        let match;
+
+        while ((match = boldRegex.exec(text)) !== null) {
+          const term = (match[1] || match[2]).trim();
+          const id = slugify(term);
+
+          // Skip short terms, duplicates, or common words
+          if (term.length > 2 && !seen.has(id)) {
+            seen.add(id);
+            concepts.push({ id, name: term });
+          }
+        }
+
+        return concepts;
+      };
+
+      const updateConceptGraph = (setConceptGraph, nodeId, messageIndex, extractedConcepts) => {
+        if (!extractedConcepts || extractedConcepts.length === 0) return;
+
+        setConceptGraph(prev => {
+          const newConcepts = { ...prev.concepts };
+          const newEdges = [...prev.edges];
+          const conceptsInMessage = [];
+
+          // Add/update concepts
+          extractedConcepts.forEach(({ id, name }) => {
+            if (!newConcepts[id]) {
+              newConcepts[id] = {
+                id,
+                name,
+                sourceNodes: [nodeId],
+                sourceMessages: [{ nodeId, messageIndex }],
+                count: 1,
+                firstSeen: Date.now(),
+                lastSeen: Date.now(),
+              };
+            } else {
+              const existing = newConcepts[id];
+              const alreadyInNode = existing.sourceNodes.includes(nodeId);
+              newConcepts[id] = {
+                ...existing,
+                sourceNodes: alreadyInNode ? existing.sourceNodes : [...existing.sourceNodes, nodeId],
+                sourceMessages: [...existing.sourceMessages, { nodeId, messageIndex }],
+                count: existing.count + 1,
+                lastSeen: Date.now(),
+              };
+            }
+            conceptsInMessage.push(id);
+          });
+
+          // Create edges for co-occurring concepts in same message
+          for (let i = 0; i < conceptsInMessage.length; i++) {
+            for (let j = i + 1; j < conceptsInMessage.length; j++) {
+              const edgeKey = [conceptsInMessage[i], conceptsInMessage[j]].sort().join('--');
+              const edgeExists = newEdges.some(e =>
+                [e.from, e.to].sort().join('--') === edgeKey
+              );
+              if (!edgeExists) {
+                newEdges.push({
+                  from: conceptsInMessage[i],
+                  to: conceptsInMessage[j],
+                  type: 'same-message',
+                  weight: 3,
+                  sourceNodeId: nodeId,
+                });
+              }
+            }
+          }
+
+          return { concepts: newConcepts, edges: newEdges };
+        });
+      };
+
+      // Build concept graph summary for cross-thread AI awareness
+      const buildConceptGraphSummary = (conceptGraph, currentNodeId, nodes) => {
+        const concepts = Object.values(conceptGraph.concepts);
+        if (concepts.length === 0) return '';
+
+        // Find the root thread of the current node
+        let currentRootId = currentNodeId;
+        let cursor = nodes[currentNodeId];
+        while (cursor && cursor.parentId) {
+          currentRootId = cursor.parentId;
+          cursor = nodes[cursor.parentId];
+        }
+
+        // Group concepts by root thread (excluding current thread)
+        const conceptsByThread = {};
+        concepts.forEach(c => {
+          c.sourceNodes.forEach(nodeId => {
+            // Find root of this node
+            let rootId = nodeId;
+            let nodeCursor = nodes[nodeId];
+            while (nodeCursor && nodeCursor.parentId) {
+              rootId = nodeCursor.parentId;
+              nodeCursor = nodes[nodeCursor.parentId];
+            }
+
+            // Skip concepts from current thread
+            if (rootId === currentRootId) return;
+
+            const rootNode = nodes[rootId];
+            if (!rootNode) return;
+
+            if (!conceptsByThread[rootId]) {
+              conceptsByThread[rootId] = {
+                title: rootNode.title || 'Unknown Thread',
+                concepts: new Set(),
+              };
+            }
+            conceptsByThread[rootId].concepts.add(c.name);
+          });
+        });
+
+        const threadEntries = Object.entries(conceptsByThread);
+        if (threadEntries.length === 0) return '';
+
+        let summary = '\n## Concepts the user has explored in other threads:\n';
+        threadEntries.forEach(([threadId, data]) => {
+          const conceptList = Array.from(data.concepts);
+          summary += `- "${data.title}": ${conceptList.slice(0, 6).join(', ')}`;
+          if (conceptList.length > 6) summary += ` (+${conceptList.length - 6} more)`;
+          summary += '\n';
+        });
+        summary += '\nReference these naturally when relevant: "You explored X in another thread..."';
+
+        return summary;
+      };
+
       // Mermaid Diagram Component with clickable nodes and lightbox
       function MermaidDiagram({ chart, id, onNodeClick }) {
         const containerRef = useRef(null);
         const [svg, setSvg] = useState('');
         const [error, setError] = useState(null);
         const [showLightbox, setShowLightbox] = useState(false);
+        const [zoom, setZoom] = useState(1);
+        const [pan, setPan] = useState({ x: 0, y: 0 });
+        const [isDragging, setIsDragging] = useState(false);
+        const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
 
         useEffect(() => {
           const renderChart = async () => {
@@ -482,41 +738,124 @@
 
           const container = containerRef.current;
 
-          // Find all clickable nodes in the Mermaid SVG
-          const nodes = container.querySelectorAll('.node, .nodeLabel, .cluster-label, .edgeLabel');
+          // Find all clickable nodes in the Mermaid SVG - expanded selectors for all diagram types
+          const nodeSelectors = [
+            '.node', '.nodeLabel', '.cluster-label', '.edgeLabel',  // flowcharts
+            '.actor', '.actor-box', '.messageLine', '.noteText',    // sequence diagrams
+            '.task', '.taskText', '.sectionTitle',                  // gantt charts
+            '.state', '.stateLabel',                                 // state diagrams
+            '.pieTitleText', '.slice',                               // pie charts
+            '.journey-section', '.task-state',                       // journey diagrams
+            '.eventWrapper', '.taskWrapper',                         // timeline diagrams (actual classes)
+            '[class^="section-"]', '[class*=" section-"]',           // timeline section classes
+            '.classLabel', '.classTitle',                            // class diagrams
+            '.entityLabel', '.relationshipLabel',                    // ER diagrams
+            '.mindmap-node'                                          // mindmaps
+          ];
+          let nodes = container.querySelectorAll(nodeSelectors.join(', '));
+
+          // Fallback: if no nodes found with specific selectors, find all g elements containing text
+          if (nodes.length === 0) {
+            nodes = container.querySelectorAll('g');
+          }
+
+          // Track which elements we've already made clickable to avoid duplicates
+          const processedElements = new Set();
 
           nodes.forEach((node) => {
-            // Get the text content of the node
-            const textEl = node.querySelector('span, text, foreignObject') || node;
-            const text = textEl.textContent?.trim();
+            // Get all text elements within this node
+            const textElements = node.querySelectorAll('text, tspan, foreignObject span');
 
-            if (text && text.length > 1) {
+            textElements.forEach((textEl) => {
+              const text = textEl.textContent?.trim();
+
+              // Skip if already processed, too short, or just a number/symbol
+              if (!text || text.length < 2 || processedElements.has(textEl) || /^[\d\s\-\.]+$/.test(text)) {
+                return;
+              }
+
+              processedElements.add(textEl);
+
+              // Find the clickable parent (g element or the node itself)
+              const clickTarget = textEl.closest('g') || textEl;
+
+              if (!processedElements.has(clickTarget)) {
+                processedElements.add(clickTarget);
+                clickTarget.style.cursor = 'pointer';
+                clickTarget.classList.add('clickable-node');
+
+                const handleClick = (e) => {
+                  e.stopPropagation();
+                  onNodeClick(text);
+                };
+
+                clickTarget.addEventListener('click', handleClick);
+                clickTarget._cleanupClick = () => clickTarget.removeEventListener('click', handleClick);
+              }
+            });
+
+            // Also handle the node itself if it has direct text content
+            const directText = node.querySelector('span, text, foreignObject, tspan') || node;
+            const text = directText.textContent?.trim();
+
+            if (text && text.length > 1 && !processedElements.has(node) && !/^[\d\s\-\.]+$/.test(text)) {
+              processedElements.add(node);
               node.style.cursor = 'pointer';
               node.classList.add('clickable-node');
 
-              // Add click handler
               const handleClick = (e) => {
                 e.stopPropagation();
                 onNodeClick(text);
               };
 
               node.addEventListener('click', handleClick);
-
-              // Store cleanup function
               node._cleanupClick = () => node.removeEventListener('click', handleClick);
             }
           });
 
-          // Cleanup
+          // Cleanup - find all elements with cleanup handlers
           return () => {
-            nodes.forEach((node) => {
-              if (node._cleanupClick) {
-                node._cleanupClick();
-                delete node._cleanupClick;
+            const allClickable = container.querySelectorAll('.clickable-node');
+            allClickable.forEach((el) => {
+              if (el._cleanupClick) {
+                el._cleanupClick();
+                delete el._cleanupClick;
               }
+              el.classList.remove('clickable-node');
             });
           };
         }, [svg, onNodeClick]);
+
+        // Reset zoom when lightbox opens
+        useEffect(() => {
+          if (showLightbox) {
+            setZoom(1);
+            setPan({ x: 0, y: 0 });
+          }
+        }, [showLightbox]);
+
+        const handleWheel = (e) => {
+          e.preventDefault();
+          const delta = e.deltaY > 0 ? -0.1 : 0.1;
+          setZoom(z => Math.min(Math.max(0.5, z + delta), 4));
+        };
+
+        const handleMouseDown = (e) => {
+          if (e.button === 0) {
+            setIsDragging(true);
+            setDragStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+          }
+        };
+
+        const handleMouseMove = (e) => {
+          if (isDragging) {
+            setPan({ x: e.clientX - dragStart.x, y: e.clientY - dragStart.y });
+          }
+        };
+
+        const handleMouseUp = () => {
+          setIsDragging(false);
+        };
 
         if (error) {
           return (
@@ -545,10 +884,29 @@
 
             {showLightbox && ReactDOM.createPortal(
               <div className="lightbox-overlay" onClick={() => setShowLightbox(false)}>
-                <div className="lightbox-content" onClick={(e) => e.stopPropagation()}>
+                <div
+                  className="lightbox-content"
+                  onClick={(e) => e.stopPropagation()}
+                  onWheel={handleWheel}
+                  onMouseDown={handleMouseDown}
+                  onMouseMove={handleMouseMove}
+                  onMouseUp={handleMouseUp}
+                  onMouseLeave={handleMouseUp}
+                  style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
+                >
                   <button className="lightbox-close" onClick={() => setShowLightbox(false)}>✕</button>
+                  <div className="lightbox-controls">
+                    <button onClick={() => setZoom(z => Math.min(z + 0.25, 4))} title="Zoom in">+</button>
+                    <span className="lightbox-zoom-level">{Math.round(zoom * 100)}%</span>
+                    <button onClick={() => setZoom(z => Math.max(z - 0.25, 0.5))} title="Zoom out">−</button>
+                    <button onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }} title="Reset">Reset</button>
+                  </div>
                   <div
                     className="lightbox-diagram"
+                    style={{
+                      transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                      transformOrigin: 'center center',
+                    }}
                     dangerouslySetInnerHTML={{ __html: svg }}
                   />
                 </div>
@@ -882,30 +1240,116 @@
         );
       }
 
-      // Markdown renderer with support for special blocks (mermaid, chart, comparison, flashcards)
+      // Code Block Component with syntax highlighting and copy button
+      function CodeBlock({ code, language = '' }) {
+        const [copied, setCopied] = useState(false);
+        const codeRef = useRef(null);
+
+        // Normalize language names
+        const normalizeLanguage = (lang) => {
+          const langMap = {
+            'js': 'javascript',
+            'ts': 'typescript',
+            'py': 'python',
+            'sh': 'bash',
+            'shell': 'bash',
+            'yml': 'yaml',
+            'rb': 'ruby',
+          };
+          return langMap[lang?.toLowerCase()] || lang?.toLowerCase() || 'plaintext';
+        };
+
+        const normalizedLang = normalizeLanguage(language);
+
+        useEffect(() => {
+          if (codeRef.current && window.Prism) {
+            window.Prism.highlightElement(codeRef.current);
+          }
+        }, [code, normalizedLang]);
+
+        const handleCopy = async () => {
+          try {
+            await navigator.clipboard.writeText(code);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+          } catch (err) {
+            console.warn('Failed to copy:', err);
+          }
+        };
+
+        return (
+          <div className="code-block">
+            <div className="code-block-header">
+              <span className="code-block-language">{normalizedLang || 'code'}</span>
+              <button className="code-block-copy" onClick={handleCopy}>
+                {copied ? '✓ Copied' : 'Copy'}
+              </button>
+            </div>
+            <pre className={`language-${normalizedLang}`}>
+              <code ref={codeRef} className={`language-${normalizedLang}`}>
+                {code}
+              </code>
+            </pre>
+          </div>
+        );
+      }
+
+      // Markdown renderer with support for special blocks (mermaid, chart, comparison, flashcards, code)
       const renderMarkdown = (text, onInteractiveClick) => {
         if (!text) return null;
 
-        // Unified regex for all special block types
-        const blockRegex = /```(mermaid|chart|comparison|flashcards)\s*([\s\S]*?)```/g;
+        // Two-pass approach: first extract special blocks, then handle remaining code blocks
+        // Special blocks that have custom rendering
+        const specialBlockRegex = /```(mermaid|chart|comparison|flashcards|prereqs|suggestions|landscape)\s*([\s\S]*?)```/g;
+        // Generic code blocks (any other language or no language)
+        const codeBlockRegex = /```(\w*)\n?([\s\S]*?)```/g;
+
         const parts = [];
         let lastIndex = 0;
-        let match;
-        const counters = { mermaid: 0, chart: 0, comparison: 0, flashcards: 0 };
+        const counters = { mermaid: 0, chart: 0, comparison: 0, flashcards: 0, code: 0, landscape: 0 };
 
-        while ((match = blockRegex.exec(text)) !== null) {
-          // Add text before this block
-          if (match.index > lastIndex) {
-            parts.push({ type: 'text', content: text.slice(lastIndex, match.index) });
-          }
-          // Add the special block
-          const blockType = match[1];
-          parts.push({
-            type: blockType,
-            content: match[2].trim(),
-            id: counters[blockType]++
+        // First pass: find all ``` blocks
+        const allBlocks = [];
+        let match;
+
+        // Reset regex
+        const allBlockRegex = /```(\w*)\n?([\s\S]*?)```/g;
+        while ((match = allBlockRegex.exec(text)) !== null) {
+          const blockType = match[1].toLowerCase();
+          const isSpecial = ['mermaid', 'chart', 'comparison', 'flashcards', 'prereqs', 'suggestions', 'landscape'].includes(blockType);
+
+          allBlocks.push({
+            start: match.index,
+            end: match.index + match[0].length,
+            type: isSpecial ? blockType : 'code',
+            language: isSpecial ? null : match[1],
+            content: match[2].trim()
           });
-          lastIndex = match.index + match[0].length;
+        }
+
+        // Build parts array
+        for (const block of allBlocks) {
+          if (block.start > lastIndex) {
+            parts.push({ type: 'text', content: text.slice(lastIndex, block.start) });
+          }
+
+          if (block.type === 'code') {
+            parts.push({
+              type: 'code',
+              language: block.language,
+              content: block.content,
+              id: counters.code++
+            });
+          } else if (!['prereqs', 'suggestions'].includes(block.type)) {
+            // Special blocks (mermaid, chart, etc.) - skip prereqs/suggestions as they're handled elsewhere
+            parts.push({
+              type: block.type,
+              content: block.content,
+              id: counters[block.type]++
+            });
+          }
+
+          lastIndex = block.end;
         }
 
         // Add remaining text
@@ -913,7 +1357,7 @@
           parts.push({ type: 'text', content: text.slice(lastIndex) });
         }
 
-        // If no special blocks, use simple text rendering
+        // If no blocks found, use simple text rendering
         if (parts.length === 0) {
           parts.push({ type: 'text', content: text });
         }
@@ -984,12 +1428,25 @@
           switch (part.type) {
             case 'mermaid':
               return <MermaidDiagram key={`mermaid-${idx}`} chart={part.content} id={part.id} onNodeClick={onInteractiveClick} />;
+            case 'landscape':
+              return (
+                <div key={`landscape-${idx}`} className="landscape-diagram">
+                  <div className="landscape-header">
+                    <span className="landscape-icon">🗺️</span>
+                    <span>Domain Landscape</span>
+                  </div>
+                  <MermaidDiagram chart={part.content} id={`landscape-${part.id}`} onNodeClick={onInteractiveClick} />
+                  <div className="landscape-hint">Click any area to explore deeper</div>
+                </div>
+              );
             case 'chart':
               return <ChartDiagram key={`chart-${idx}`} config={part.content} id={part.id} onLabelClick={onInteractiveClick} />;
             case 'comparison':
               return <ComparisonTable key={`comparison-${idx}`} config={part.content} onCellClick={onInteractiveClick} />;
             case 'flashcards':
               return <FlashcardDeck key={`flashcards-${idx}`} config={part.content} onTermClick={onInteractiveClick} />;
+            case 'code':
+              return <CodeBlock key={`code-${idx}`} code={part.content} language={part.language} />;
             default:
               return <React.Fragment key={`text-${idx}`}>{renderTextBlock(part.content, `t${idx}`)}</React.Fragment>;
           }
@@ -1637,12 +2094,20 @@
       // ============================================
       // UI COMPONENTS - Canvas Controls
       // ============================================
-      function CanvasControls({ onZoomIn, onZoomOut, onReset, onNewThread }) {
+      function CanvasControls({ onZoomIn, onZoomOut, onReset, onNewThread, viewMode, onToggleView, conceptCount }) {
         return (
           <div className="canvas-controls">
             <button onClick={onZoomIn} title="Zoom in">+</button>
             <button onClick={onZoomOut} title="Zoom out">−</button>
             <button onClick={onReset} title="Reset view">⌂</button>
+            <button
+              onClick={onToggleView}
+              title={viewMode === 'tree' ? 'Switch to Concept Map' : 'Switch to Tree View'}
+              className={`view-toggle-btn ${viewMode === 'concept-map' ? 'active' : ''}`}
+            >
+              {viewMode === 'tree' ? '◉ Map' : '⎔ Tree'}
+              {viewMode === 'tree' && conceptCount > 0 && <span className="concept-count-badge">{conceptCount}</span>}
+            </button>
             <button onClick={onNewThread} title="New top-level thread" className="new-thread-btn">+ New</button>
           </div>
         );
@@ -1682,6 +2147,9 @@
         transform,
         onTransformChange,
         onNewThread,
+        viewMode,
+        onToggleView,
+        conceptCount,
       }) {
         const canvasRef = useRef(null);
         const [isPanning, setIsPanning] = useState(false);
@@ -1780,6 +2248,9 @@
               onZoomOut={() => onTransformChange({ ...transform, scale: Math.max(0.3, transform.scale / 1.2) })}
               onReset={() => onTransformChange({ x: 0, y: 0, scale: 1 })}
               onNewThread={onNewThread}
+              viewMode={viewMode}
+              onToggleView={onToggleView}
+              conceptCount={conceptCount}
             />
             <div
               className="canvas-content"
@@ -1803,6 +2274,333 @@
                   />
                 );
               })}
+            </div>
+          </div>
+        );
+      }
+
+      // ============================================
+      // CONCEPT MAP - Dagre Hierarchical Layout
+      // ============================================
+      const calculateDagreLayout = (conceptGraph, canvasWidth = 1200, canvasHeight = 800) => {
+        try {
+          if (!conceptGraph || !conceptGraph.concepts) return {};
+          const concepts = Object.values(conceptGraph.concepts);
+          const edges = conceptGraph.edges || [];
+
+          if (concepts.length === 0) return {};
+
+          // Create a new dagre graph
+          const g = new dagre.graphlib.Graph();
+
+          // Set graph options for hierarchical layout
+          g.setGraph({
+            rankdir: 'TB',      // Top to bottom
+            nodesep: 120,       // Horizontal spacing between nodes
+            ranksep: 100,       // Vertical spacing between ranks
+            marginx: 80,
+            marginy: 80,
+            ranker: 'network-simplex',  // Algorithm: 'network-simplex', 'tight-tree', or 'longest-path'
+          });
+
+          // Required for dagre
+          g.setDefaultEdgeLabel(() => ({}));
+
+          // Add nodes - sort by count (importance) so most connected nodes are processed first
+          const sortedConcepts = [...concepts].sort((a, b) => b.count - a.count);
+          sortedConcepts.forEach(c => {
+            // Node size based on count
+            const width = Math.min(160, 80 + c.count * 10);
+            const height = 50;
+            g.setNode(c.id, {
+              width,
+              height,
+              label: c.name,
+            });
+          });
+
+          // Add edges - stronger weights create tighter clustering
+          edges.forEach(edge => {
+            if (g.hasNode(edge.from) && g.hasNode(edge.to)) {
+              g.setEdge(edge.from, edge.to, {
+                weight: edge.weight || 1,
+              });
+            }
+          });
+
+          // Run the layout algorithm
+          dagre.layout(g);
+
+          // Extract positions
+          const positions = {};
+          g.nodes().forEach(nodeId => {
+            const node = g.node(nodeId);
+            if (node) {
+              positions[nodeId] = {
+                x: node.x,
+                y: node.y,
+              };
+            }
+          });
+
+          return positions;
+        } catch (e) {
+          console.error('Dagre layout error:', e);
+          return {};
+        }
+      };
+
+      // ============================================
+      // UI COMPONENTS - Concept Map Node
+      // ============================================
+      function ConceptMapNode({ concept, position, onClick, isHighlighted }) {
+        if (!position) return null;
+
+        const size = Math.min(140, 60 + concept.count * 15);
+
+        return (
+          <div
+            className={`concept-map-node ${isHighlighted ? 'highlighted' : ''}`}
+            style={{
+              left: position.x - size / 2,
+              top: position.y - 20,
+              minWidth: size,
+            }}
+            onClick={() => onClick(concept)}
+            title={`${concept.name} - appears ${concept.count}x in ${concept.sourceNodes.length} thread(s)`}
+          >
+            <div className="concept-name">{concept.name}</div>
+            <div className="concept-meta">
+              {concept.count}× • {concept.sourceNodes.length} thread{concept.sourceNodes.length !== 1 ? 's' : ''}
+            </div>
+          </div>
+        );
+      }
+
+      // ============================================
+      // UI COMPONENTS - Concept Map Canvas
+      // ============================================
+      function ConceptMapCanvas({
+        conceptGraph,
+        onConceptClick,
+        transform,
+        onTransformChange,
+        onNewThread,
+        viewMode,
+        onToggleView,
+        apiKey,
+      }) {
+        const canvasRef = useRef(null);
+        const [isPanning, setIsPanning] = useState(false);
+        const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+        const [highlightedConcept, setHighlightedConcept] = useState(null);
+        const [curatedIds, setCuratedIds] = useState(null);
+        const [manuallyAddedIds, setManuallyAddedIds] = useState(new Set());
+        const [isCurating, setIsCurating] = useState(false);
+        const [showHiddenMenu, setShowHiddenMenu] = useState(false);
+        const lastCurationKey = useRef(null);
+
+        // Curate concepts when graph changes significantly
+        const allConcepts = useMemo(() => Object.values(conceptGraph.concepts), [conceptGraph.concepts]);
+        const curationKey = useMemo(() => allConcepts.map(c => c.id).sort().join(','), [allConcepts]);
+
+        useEffect(() => {
+          if (curationKey === lastCurationKey.current) return;
+          if (allConcepts.length <= 8) {
+            setCuratedIds(null); // Show all if small set
+            lastCurationKey.current = curationKey;
+            return;
+          }
+
+          lastCurationKey.current = curationKey;
+          setIsCurating(true);
+          setManuallyAddedIds(new Set()); // Reset manual additions on new curation
+
+          curateConceptsWithAI(allConcepts, apiKey)
+            .then(ids => setCuratedIds(ids))
+            .finally(() => setIsCurating(false));
+        }, [curationKey, apiKey]);
+
+        // Filter concepts based on curation + manually added
+        const displayConcepts = useMemo(() => {
+          if (!curatedIds) return allConcepts;
+          return allConcepts.filter(c => curatedIds.includes(c.id) || manuallyAddedIds.has(c.id));
+        }, [allConcepts, curatedIds, manuallyAddedIds]);
+
+        // Hidden concepts (not displayed)
+        const hiddenConcepts = useMemo(() => {
+          if (!curatedIds) return [];
+          const displayIds = new Set(displayConcepts.map(c => c.id));
+          return allConcepts.filter(c => !displayIds.has(c.id));
+        }, [allConcepts, displayConcepts, curatedIds]);
+
+        const handleAddConcept = (conceptId) => {
+          setManuallyAddedIds(prev => new Set([...prev, conceptId]));
+          setShowHiddenMenu(false);
+        };
+
+        // Filter edges to only show connections between displayed concepts
+        const displayEdges = useMemo(() => {
+          const displayConceptIds = new Set(displayConcepts.map(c => c.id));
+          return (conceptGraph.edges || []).filter(
+            e => displayConceptIds.has(e.from) && displayConceptIds.has(e.to)
+          );
+        }, [displayConcepts, conceptGraph.edges]);
+
+        // Calculate positions using dagre hierarchical layout
+        const positions = useMemo(() => {
+          const filteredGraph = {
+            concepts: Object.fromEntries(displayConcepts.map(c => [c.id, c])),
+            edges: displayEdges,
+          };
+          return calculateDagreLayout(filteredGraph, 1500, 1000);
+        }, [displayConcepts, displayEdges]);
+
+        const handleMouseDown = (e) => {
+          if (e.target.closest('.concept-map-node')) return;
+          e.preventDefault();
+          setIsPanning(true);
+          setPanStart({ x: e.clientX - transform.x, y: e.clientY - transform.y });
+        };
+
+        const handleMouseMove = (e) => {
+          if (!isPanning) return;
+          onTransformChange({
+            ...transform,
+            x: e.clientX - panStart.x,
+            y: e.clientY - panStart.y,
+          });
+        };
+
+        const handleMouseUp = () => setIsPanning(false);
+
+        const handleWheel = (e) => {
+          e.preventDefault();
+          const delta = e.deltaY > 0 ? 0.9 : 1.1;
+          const newScale = Math.max(0.3, Math.min(2, transform.scale * delta));
+          onTransformChange({ ...transform, scale: newScale });
+        };
+
+        useEffect(() => {
+          const canvas = canvasRef.current;
+          if (canvas) {
+            canvas.addEventListener('wheel', handleWheel, { passive: false });
+            return () => canvas.removeEventListener('wheel', handleWheel);
+          }
+        }, [transform]);
+
+        // Render edges
+        const renderEdges = () => {
+          return displayEdges.map((edge, i) => {
+            const p1 = positions[edge.from];
+            const p2 = positions[edge.to];
+            if (!p1 || !p2) return null;
+
+            const isHighlighted = highlightedConcept &&
+              (edge.from === highlightedConcept || edge.to === highlightedConcept);
+
+            return (
+              <line
+                key={i}
+                x1={p1.x}
+                y1={p1.y}
+                x2={p2.x}
+                y2={p2.y}
+                className={`concept-edge weight-${edge.weight} ${isHighlighted ? 'highlighted' : ''}`}
+              />
+            );
+          });
+        };
+
+        if (allConcepts.length === 0) {
+          return (
+            <div className="concept-map-container empty" ref={canvasRef}>
+              <CanvasControls
+                onZoomIn={() => onTransformChange({ ...transform, scale: Math.min(2, transform.scale * 1.2) })}
+                onZoomOut={() => onTransformChange({ ...transform, scale: Math.max(0.3, transform.scale / 1.2) })}
+                onReset={() => onTransformChange({ x: 0, y: 0, scale: 1 })}
+                onNewThread={onNewThread}
+                viewMode={viewMode}
+                onToggleView={onToggleView}
+                conceptCount={0}
+              />
+              <div className="empty-concept-map">
+                <div className="empty-icon">◉</div>
+                <div className="empty-title">No concepts yet</div>
+                <div className="empty-hint">Start exploring topics to build your concept map</div>
+              </div>
+            </div>
+          );
+        }
+
+        return (
+          <div
+            className="concept-map-container"
+            ref={canvasRef}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+          >
+            <CanvasControls
+              onZoomIn={() => onTransformChange({ ...transform, scale: Math.min(2, transform.scale * 1.2) })}
+              onZoomOut={() => onTransformChange({ ...transform, scale: Math.max(0.3, transform.scale / 1.2) })}
+              onReset={() => onTransformChange({ x: 0, y: 0, scale: 1 })}
+              onNewThread={onNewThread}
+              viewMode={viewMode}
+              onToggleView={onToggleView}
+              conceptCount={displayConcepts.length}
+            />
+            <div className="concept-map-stats">
+              {isCurating ? 'Curating...' : (
+                curatedIds
+                  ? `${displayConcepts.length} key concepts (of ${allConcepts.length}) • ${displayEdges.length} connections`
+                  : `${displayConcepts.length} concepts • ${displayEdges.length} connections`
+              )}
+            </div>
+            {hiddenConcepts.length > 0 && (
+              <div className="hidden-concepts-toggle">
+                <button
+                  className="hidden-concepts-btn"
+                  onClick={() => setShowHiddenMenu(!showHiddenMenu)}
+                >
+                  + {hiddenConcepts.length} hidden
+                </button>
+                {showHiddenMenu && (
+                  <div className="hidden-concepts-menu">
+                    <div className="hidden-menu-header">Add concept to map</div>
+                    {hiddenConcepts.map(c => (
+                      <button
+                        key={c.id}
+                        className="hidden-concept-item"
+                        onClick={() => handleAddConcept(c.id)}
+                      >
+                        <span className="hidden-concept-name">{c.name}</span>
+                        <span className="hidden-concept-count">{c.count}×</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            <div
+              className="canvas-content"
+              style={{
+                transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
+              }}
+            >
+              <svg className="concept-edge-layer" style={{ width: 2000, height: 1200 }}>
+                {renderEdges()}
+              </svg>
+              {displayConcepts.map(concept => (
+                <ConceptMapNode
+                  key={concept.id}
+                  concept={concept}
+                  position={positions[concept.id]}
+                  onClick={onConceptClick}
+                  isHighlighted={highlightedConcept === concept.id}
+                />
+              ))}
             </div>
           </div>
         );
@@ -2176,6 +2974,17 @@
         const [mergePreview, setMergePreview] = useState(null);
         const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
+        // Concept graph state (for concept map view)
+        const [conceptGraph, setConceptGraph] = useState(() => {
+          try {
+            const saved = localStorage.getItem(STORAGE_KEY_CONCEPTS);
+            return saved ? JSON.parse(saved) : { concepts: {}, edges: [] };
+          } catch {
+            return { concepts: {}, edges: [] };
+          }
+        });
+        const [viewMode, setViewMode] = useState('tree'); // 'tree' | 'concept-map'
+
         // API and settings state
         const [apiKey, setApiKey] = useState(() => localStorage.getItem(STORAGE_KEY_API) || "");
         const [model, setModel] = useState(() => localStorage.getItem(STORAGE_KEY_MODEL) || MODELS[0].id);
@@ -2186,6 +2995,7 @@
         // Pending auto-send queue for forked nodes (supports multiple concurrent forks)
         const [pendingSendQueue, setPendingSendQueue] = useState([]);
         const handleSendRef = useRef(null);
+        const simulateAssistantRef = useRef(null);
         const processingSendRef = useRef(false);
 
         // Effect to handle pending auto-sends when nodes become available
@@ -2226,6 +3036,11 @@
         useEffect(() => {
           localStorage.setItem(STORAGE_KEY_ACTIVE, activeId);
         }, [activeId]);
+
+        // Save concept graph to localStorage
+        useEffect(() => {
+          localStorage.setItem(STORAGE_KEY_CONCEPTS, JSON.stringify(conceptGraph));
+        }, [conceptGraph]);
 
         // Build enriched tree (supports multiple top-level threads)
         const trees = useMemo(() => {
@@ -2404,14 +3219,61 @@
                 ? `This is the start of a new topic. Gauge their familiarity level before diving deep.`
                 : '';
 
-            const prereqContext = node.prereqAssessment
-              ? (node.prereqAssessment._skipped
-                  ? '\n## User skipped prerequisite assessment - assume intermediate knowledge and explain concepts as needed.'
-                  : `\n## User's Prerequisite Knowledge Assessment:\n${Object.entries(node.prereqAssessment)
-                      .filter(([key]) => key !== '_skipped')
-                      .map(([concept, level]) => `- ${concept}: Level ${level}/3 (0=no idea, 1=surface, 2=working, 3=deep)`)
-                      .join('\n')}\n\nTailor your explanation: For level 0, explain the prerequisite from scratch. Fill gaps for level 1-2 concepts. Skip basics for level 3 concepts.`)
-              : '';
+            // Build cross-thread awareness context
+            const crossThreadContext = buildConceptGraphSummary(conceptGraph, id, nodes);
+
+            // Build detailed prereq context with specific instructions based on knowledge gaps
+            let prereqContext = '';
+            let needsLongResponse = false;
+            if (node.prereqAssessment) {
+              if (node.prereqAssessment._skipped) {
+                prereqContext = '\n## User skipped prerequisite assessment - assume intermediate knowledge and explain concepts as needed.';
+              } else {
+                const entries = Object.entries(node.prereqAssessment).filter(([key]) => key !== '_skipped');
+                const level0Concepts = entries.filter(([_, level]) => level === 0).map(([c]) => c);
+                const level1Concepts = entries.filter(([_, level]) => level === 1).map(([c]) => c);
+                const level2Concepts = entries.filter(([_, level]) => level === 2).map(([c]) => c);
+                const level3Concepts = entries.filter(([_, level]) => level === 3).map(([c]) => c);
+
+                needsLongResponse = level0Concepts.length > 0;
+
+                let instructions = `\n## 🎯 TEACH BASED ON USER'S KNOWLEDGE GAPS:
+${entries.map(([concept, level]) => `- ${concept}: Level ${level}`).join('\n')}
+(0=no idea, 1=heard of it, 2=working knowledge, 3=expert)`;
+
+                if (level0Concepts.length > 0) {
+                  instructions += `
+
+### 🚨 USER HAS ZERO KNOWLEDGE OF: ${level0Concepts.join(', ')}
+**THIS OVERRIDES THE "KEEP IT SHORT" RULE.** You MUST actually teach these concepts.
+For EACH level-0 concept, explain: what it is, why it matters, give a concrete example.
+THEN connect to the main topic.`;
+                }
+
+                if (level1Concepts.length > 0) {
+                  instructions += `
+
+### User has SURFACE awareness of: ${level1Concepts.join(', ')}
+Give 1-2 sentence refreshers with examples before connecting to main topic.`;
+                }
+
+                if (level2Concepts.length > 0) {
+                  instructions += `
+
+### User has working knowledge of: ${level2Concepts.join(', ')}
+Reference freely, connect to main topic.`;
+                }
+
+                if (level3Concepts.length > 0) {
+                  instructions += `
+
+### User is EXPERT in: ${level3Concepts.join(', ')}
+Use technical terms freely.`;
+                }
+
+                prereqContext = instructions;
+              }
+            }
 
             const depthContext = depth > 0
               ? `Current exploration depth: ${depth}. The user has branched ${depth} level(s) deep into subtopics.`
@@ -2425,47 +3287,144 @@
               ? `\n## Background from parent conversation:\n${parentContext}\n\nBuild on this foundation - the user has already discussed the above.`
               : '';
 
-            const systemPrompt = `You are a guide in Fork, an exploration-first learning tool. Your job is to help users discover what interests them by offering clear, concise explanations with many paths to explore deeper.
+            const systemPrompt = `You are a master teacher in Fork - a learning tool where users explore by BRANCHING into subtopics.
 
-## CRITICAL: Exploration Over Clarification
-This tool works differently than typical AI interactions:
-- Users learn by BRANCHING into subtopics, not by you asking clarifying questions
-- Don't ask "what aspect interests you?" - instead, explain briefly and offer interesting branches
-- The UI lets users click on ANY term to explore it - your job is to make concepts click-worthy
-- Short, curiosity-sparking responses beat thorough explanations
-- If unsure what they want, give a quick overview with MANY branch options - let them choose their path
+## How Fork Works
 
-## Depth-Aware Behavior:
-${depth === 0 ? `- This is a TOP-LEVEL thread - user is likely still figuring out what they want to learn
+**The core mechanic:** Users click on concepts to "fork" into deeper exploration. Each fork creates a new conversation thread. This lets them build understanding piece by piece, going deep where they're curious.
+
+**Your job:** Give concise explanations with MANY interesting paths to explore. Don't try to cover everything - make them WANT to fork into subtopics.
+
+## Your Toolkit (USE THESE!)
+
+| Tool | Purpose | When to Use |
+|------|---------|-------------|
+| **Branches** | Let users explore what interests them | EVERY response - suggest 3-5 clickable subtopics |
+| **Bold terms** | Signal forkable concepts | Bold **key terms** users might want to explore |
+| **Prereqs** | Gauge knowledge before explaining | Complex topics on first message |
+| **Diagrams** | Show relationships & processes | Concepts with structure, flows, timelines |
+| **Charts** | Visualize data | Numbers, trends, comparisons |
+| **Flashcards** | Test understanding | Vocabulary, definitions, key facts |
+| **Comparison tables** | Side-by-side analysis | Comparing options or frameworks |
+| **Code blocks** | Show actual code | Programming topics |
+
+**Diagrams are essential** - use them liberally:
+- History → timeline diagrams
+- Processes → sequence or flowchart
+- Hierarchies → flowchart with relationships
+- States/lifecycles → stateDiagram
+
+## Teaching Philosophy
+
+1. **Meet them where they are** - Prereqs reveal their starting point
+2. **Build mental models** - Frameworks over facts
+3. **Create "aha" moments** - Insight over coverage
+4. **Make forking irresistible** - Every concept should have a door to something fascinating
+
+## Subject-Specific Approaches
+
+### History & Humanities
+*You are the professor who makes students rethink everything.*
+- **Lead with the surprising** - The detail that changes how they see the story
+- **People over events** - History is human motivation, not dates
+- **Primary sources** - Quotes and firsthand accounts are gold
+- **Historiographical debates** - "Hobsbawm argues X, while Roberts sees Y"
+- **Name your sources** - "Read Roberts' 'Napoleon: A Life' for more"
+
+DON'T: "Napoleon was a military genius who rose during the Revolution"
+DO: "Napoleon arrived at French military school speaking such broken French that classmates mocked his Corsican accent - an outsider psychology that drove his entire career"
+
+### Mathematics
+*You are the tutor who shows WHY, not just HOW.*
+- **Intuition before formalism** - What does this MEAN?
+- **Multiple representations** - Visual, algebraic, and verbal
+- **Build from simple cases** - Trivial examples that reveal the pattern
+- **The elegant insight** - What's the beautiful idea in the notation?
+- **Use diagrams** - Math is visual; show the geometry
+
+DON'T: State a formula and say "apply this"
+DO: "Imagine you have a pizza... [build intuition] ...which is why the formula works"
+
+### Sciences (Physics, Chemistry, Biology)
+*You are the researcher showing science as detective work.*
+- **Phenomena first** - Start with what we observe
+- **Models and limits** - Every model is wrong but useful; when does it break?
+- **History of discovery** - How did we figure this out?
+- **Connect to everyday** - They've experienced this; help them see it
+- **Use diagrams** - Molecular structures, force diagrams, biological systems
+
+DON'T: State laws to memorize
+DO: "Galileo supposedly dropped balls from Pisa - here's what he actually discovered..."
+
+### Programming & Computer Science
+*You are the senior engineer who explains both what and why.*
+- **Problem first** - What are we solving?
+- **Code is primary** - Show, don't just tell
+- **Mental models** - How should they THINK about this system?
+- **Tradeoffs** - Nothing is free; what are we giving up?
+- **No-nonsense** - Get to the point, be direct
+
+### Philosophy
+*You are the Socratic guide showing ideas in collision.*
+- **Present the tension** - What problem is this addressing?
+- **Steel-man all sides** - The best version of each argument
+- **Thought experiments** - Make abstract concrete
+- **Connect thinkers** - How did X respond to Y?
+
+### Economics & Social Sciences
+*You are the analyst showing how incentives shape behavior.*
+- **Models and assumptions** - Every model simplifies; what's assumed?
+- **Real examples** - Case studies and data
+- **Competing schools** - Different frameworks see different things
+- **Use charts** - Economic data is visual
+
+### Arts & Music
+*You are the curator who reveals what the untrained eye misses.*
+- **Technical vocabulary** - The words experts use
+- **Historical context** - What was happening when this was created?
+- **Formal analysis** - What techniques are being used?
+- **The emotional effect** - What does this create, and how?
+
+## Depth-Aware Behavior
+${depth === 0 ? `This is a TOP-LEVEL thread:
 - Keep responses SHORT (2-3 paragraphs max)
-- Offer 4+ diverse branch suggestions spanning different aspects
-- Don't ask what they already know - just start explaining accessibly` : ''}
-${depth > 0 && depth <= 2 ? `- User has branched ${depth} level(s) deep - they're narrowing focus
-- Give more detail than top-level, but still prioritize branches over exhaustive explanation
-- 3-4 branch suggestions, more specific to this subtopic` : ''}
-${depth > 2 ? `- User is ${depth} levels deep - they're clearly interested in detail here
-- Can give more thorough explanations
-- 2-3 very specific branch suggestions` : ''}
+- Offer 4+ diverse branch suggestions
+- Quick overview with MANY paths to choose` : ''}
+${depth > 0 && depth <= 2 ? `User has branched ${depth} level(s) deep:
+- More detail, but still prioritize branches
+- 3-4 specific branch suggestions` : ''}
+${depth > 2 ? `User is ${depth} levels deep:
+- Thorough explanations welcome
+- 2-3 very specific branches` : ''}
 
-${isFirstMessage && isTopLevel && !node.prereqAssessment ? `## ⚠️ FIRST MESSAGE - ASSESS PREREQUISITES FIRST
-This is the user's FIRST message in a new exploration. Before explaining the topic, check if prerequisites would help.
+${isFirstMessage && isTopLevel && !node.prereqAssessment ? `## 🛑 STOP - OUTPUT FORMAT FOR THIS MESSAGE
 
-**If the topic has significant foundational concepts** (e.g., RDMA, Kubernetes, distributed systems, ML architectures):
-- Output ONLY a \`prereqs\` block - nothing else
-- Do NOT include any explanation or text before/after the prereqs block
-- The UI will show the prereqs as interactive cards for the user to click
-- After they complete the assessment, you'll receive their levels and can give a tailored response
-
-**If the topic is simple or standalone** (e.g., "what is Python", "explain loops"):
-- Skip the prereqs block entirely and respond normally with an explanation
-
-Example of a prereqs-only response for "RDMA":
+**FOR COMPLEX TOPICS: Your ENTIRE response must be ONLY this:**
 \`\`\`prereqs
-{"topic":"RDMA","concepts":[{"name":"Operating System Kernels","importance":"critical","levels":[{"level":1,"statement":"I know the kernel manages hardware"},{"level":2,"statement":"I understand user vs kernel space"},{"level":3,"statement":"I can explain memory mapping and DMA"}]}],"tooMany":false}
-\`\`\`` : ''}
+{"topic":"Topic Name","concepts":[...],"tooMany":false}
+\`\`\`
+
+**NOTHING ELSE. No intro. No explanation. No "Let me assess..." No text before or after. JUST the prereqs block.**
+
+Complex topics that REQUIRE prereqs-only response:
+- Quantum computing (Shor's, Grover's, qubits)
+- Distributed systems (Raft, Paxos, consensus, K8s internals)
+- Low-level systems (RDMA, DMA, kernel internals)
+- ML/AI internals (transformers, backprop, attention)
+- Cryptography (RSA, elliptic curves, zero-knowledge)
+
+Simple topics (respond normally, no prereqs): "what is Python", "explain loops", basic definitions
+
+**Example - if user asks "Shor's algorithm", your COMPLETE response is:**
+\`\`\`prereqs
+{"topic":"Shor's Algorithm","concepts":[{"name":"Why Factoring Matters","importance":"critical","levels":[{"level":1,"statement":"I know encryption exists"},{"level":2,"statement":"I understand RSA relies on factoring being hard"},{"level":3,"statement":"I can explain the RSA algorithm"}]},{"name":"Quantum Basics","importance":"critical","levels":[{"level":1,"statement":"I've heard of qubits"},{"level":2,"statement":"I understand superposition and measurement"},{"level":3,"statement":"I can explain quantum gates and circuits"}]},{"name":"Modular Arithmetic","importance":"high","levels":[{"level":1,"statement":"I know what modulo means"},{"level":2,"statement":"I understand modular exponentiation"},{"level":3,"statement":"I can explain period finding"}]}],"tooMany":false}
+\`\`\`
+
+That's it. Nothing more. The UI will show interactive cards. After the user responds, you'll get their levels and THEN explain.` : ''}
 
 ${expertiseContext}
 ${prereqContext}
+${crossThreadContext}
 ${immediateContextSection}
 ${parentContextSection}
 
@@ -2511,6 +3470,34 @@ gantt
 \`\`\`
 
 Keep diagrams focused - split into multiple diagrams if needed. Suggest branching for more detail.
+
+## Landscape Diagrams (for broad topics):
+For the user's FIRST message on a BROAD topic (e.g., "teach me machine learning", "explain economics"), consider showing a DOMAIN LANDSCAPE first:
+
+\`\`\`landscape
+flowchart TB
+    subgraph Core["Core Concepts"]
+        A[Supervised Learning]
+        B[Unsupervised Learning]
+    end
+    subgraph Advanced["Advanced Topics"]
+        C[Neural Networks]
+        D[Deep Learning]
+    end
+    subgraph Applications["Real-World Uses"]
+        E[Computer Vision]
+        F[NLP]
+    end
+    Core --> Advanced
+    Advanced --> Applications
+\`\`\`
+
+This shows them the TERRITORY before diving in. They can click any area to explore. Use this for:
+- Broad topics ("explain X to me", "teach me Y")
+- Multi-faceted domains (economics, history periods, programming paradigms)
+- When the user seems to want an overview
+
+DON'T use for: specific questions, follow-ups, or when the user clearly wants to dive deep immediately.
 
 ## Data Visualization with Charts:
 When showing numerical data, comparisons, or trends, use chart blocks:
@@ -2605,13 +3592,11 @@ Guidelines:
 - The user can skip the assessment entirely if they prefer - that's okay
 - After the user selects their levels, their assessment will be included in subsequent messages
 
-## Response Style:
-- **Concise over comprehensive** - they can always branch for more
-- Make terms and concepts INTERESTING so users want to click and explore them
-- Use **bold** for key terms that would make good exploration branches
-- Bullet points for listing related concepts
-- Include a diagram when it would clarify relationships
-- NO clarifying questions like "what do you want to focus on?" - just provide content and branches
+## Format Guidelines
+- **Concise** - they can always branch for more depth
+- Use **bold** for key terms that make good exploration branches
+- NO clarifying questions - just provide content and branches
+- Never ask "what aspect interests you?" - offer branches instead
 
 ## IMPORTANT - End every response with this JSON block (EXCEPT prereqs-only responses):
 
@@ -2623,7 +3608,7 @@ Guidelines:
 }
 \`\`\`
 
-**Note:** If you're outputting ONLY a prereqs block (no explanation), do NOT include a suggestions block.
+**IMPORTANT:** If this is a first message about a complex topic, output ONLY the prereqs block - no suggestions, no explanation, nothing else.
 
 - **title**: Concise title (3-5 words) capturing the topic. Update as focus becomes clearer.
 - **branches**: ${depth === 0 ? '4-5' : depth <= 2 ? '3-4' : '2-3'} interesting subtopics to explore. Make them SPECIFIC and INTRIGUING - not generic. These become clickable fork buttons.
@@ -2639,6 +3624,12 @@ Topic: "${node.title}"`;
               systemPrompt,
               (partialText) => {
                 // Update the streaming message with partial text
+                // BUT: if we detect a prereqs block during streaming, show placeholder instead
+                const hasPrereqsBlock = partialText.includes('```prereqs');
+                const displayText = (hasPrereqsBlock && !node.prereqAssessment)
+                  ? "[Assessing your background knowledge...]"
+                  : partialText;
+
                 setNodes(prev => {
                   const currentNode = prev[id];
                   if (!currentNode) return prev;
@@ -2647,7 +3638,7 @@ Topic: "${node.title}"`;
                   if (lastMsg && lastMsg.isStreaming) {
                     messages[messages.length - 1] = {
                       ...lastMsg,
-                      text: partialText
+                      text: displayText
                     };
                   }
                   return {
@@ -2661,8 +3652,13 @@ Topic: "${node.title}"`;
             // Parse the final response to extract suggestions and prereqs
             const { cleanText, suggestions, prereqs } = parseAIResponse(fullResponse);
 
-            // For prereqs-only responses, add placeholder text so it appears in conversation history
-            const finalText = cleanText || (prereqs ? "[Assessing your background knowledge...]" : "");
+            // IMPORTANT: If prereqs exist and no prior assessment, FORCE placeholder text
+            // This prevents the AI's premature explanation from being stored
+            const currentNode = nodes[id];
+            const hasNoPriorAssessment = !currentNode?.prereqAssessment;
+            const finalText = (prereqs && hasNoPriorAssessment)
+              ? "[Assessing your background knowledge...]"
+              : (cleanText || "");
 
             // Finalize the message with parsed content, suggestions, and prereqs
             setNodes(prev => {
@@ -2691,6 +3687,13 @@ Topic: "${node.title}"`;
                 [id]: { ...currentNode, messages, title: newTitle }
               };
             });
+
+            // Extract concepts from the response (use cleanText, not placeholder)
+            if (cleanText && !prereqs) {
+              const concepts = extractConceptsFromText(cleanText);
+              const messageIndex = nodes[id]?.messages.length || 0;
+              updateConceptGraph(setConceptGraph, id, messageIndex, concepts);
+            }
 
           } catch (err) {
             console.error("API Error:", err);
@@ -2723,6 +3726,227 @@ Topic: "${node.title}"`;
 
         // Keep ref updated for useEffect
         handleSendRef.current = handleSend;
+
+        // Trigger fresh AI response after prereq assessment (no new user message)
+        const triggerAssistantResponse = async (id, originalQuery) => {
+          const node = nodes[id];
+          if (!node) {
+            console.error("[triggerAssistantResponse] Node not found:", id);
+            return;
+          }
+
+          if (!apiKey) return;
+
+          // Build conversation from non-streaming, non-placeholder messages
+          const realMessages = node.messages.filter(m =>
+            !m.isStreaming && m.text !== "[Assessing your background knowledge...]"
+          );
+
+          // Ensure we have the original user query in history
+          const hasUserMessage = realMessages.some(m => m.role === 'user');
+          const conversationHistory = hasUserMessage
+            ? realMessages
+            : [...realMessages, { role: "user", text: originalQuery }];
+
+          const depth = nodesById[id]?.depth || 0;
+          const expertiseLevel = node.expertiseLevel;
+
+          console.log("[triggerAssistantResponse] Triggering fresh response for:", id, "with prereqs:", node.prereqAssessment);
+
+          setIsLoading(true);
+          setError(null);
+
+          try {
+            const isTopLevel = node.parentId === null;
+            const systemMsg = node.messages.find(m => m.role === 'system');
+            const parentContext = systemMsg?.parentContext || '';
+            const immediateContext = systemMsg?.immediateContext || '';
+
+            const expertiseContext = expertiseLevel
+              ? `The user has indicated they are at expertise level ${expertiseLevel}/5 (1=complete novice, 5=expert).`
+              : '';
+
+            // Build cross-thread awareness context
+            const crossThreadContext = buildConceptGraphSummary(conceptGraph, id, nodes);
+
+            // Build prereq context - THIS IS THE KEY PART
+            let prereqContext = '';
+            let needsLongResponse = false;
+            if (node.prereqAssessment) {
+              if (node.prereqAssessment._skipped) {
+                prereqContext = '\n## User skipped prerequisite assessment - assume intermediate knowledge and explain concepts as needed.';
+              } else {
+                const entries = Object.entries(node.prereqAssessment).filter(([key]) => key !== '_skipped');
+                const level0Concepts = entries.filter(([_, level]) => level === 0).map(([c]) => c);
+                const level1Concepts = entries.filter(([_, level]) => level === 1).map(([c]) => c);
+                const level2Concepts = entries.filter(([_, level]) => level === 2).map(([c]) => c);
+                const level3Concepts = entries.filter(([_, level]) => level === 3).map(([c]) => c);
+
+                needsLongResponse = level0Concepts.length > 0;
+
+                let instructions = `\n## 🎯 CRITICAL - TEACH BASED ON USER'S KNOWLEDGE GAPS:
+${entries.map(([concept, level]) => `- ${concept}: Level ${level}`).join('\n')}
+(0=no idea, 1=heard of it, 2=working knowledge, 3=expert)`;
+
+                if (level0Concepts.length > 0) {
+                  instructions += `
+
+### 🚨 USER HAS ZERO KNOWLEDGE OF: ${level0Concepts.join(', ')}
+
+**THIS OVERRIDES THE "KEEP IT SHORT" RULE.** You MUST actually teach these concepts.
+
+**Required response structure:**
+1. Start with: "Before we can understand [main topic], we need to build some foundations..."
+2. For EACH level-0 concept, dedicate 1-2 paragraphs explaining:
+   - What it is in simple terms
+   - Why it matters for the main topic
+   - A concrete example or analogy
+3. THEN connect these concepts to the main topic
+4. Finally explain the main topic using the foundations you just built
+
+**Example for Shor's Algorithm with level-0 "Modular Arithmetic":**
+"Before we can understand Shor's algorithm, let's build the foundation it relies on.
+
+**Modular arithmetic** is like clock math. When it's 10 o'clock and you add 5 hours, you don't get 15 - you get 3, because the clock 'wraps around' at 12. In math, we write this as '15 mod 12 = 3'. This simple idea becomes incredibly powerful...
+
+[Then explain how Shor's uses modular exponentiation to find periods]"
+
+DO NOT just mention these concepts in passing. Actually teach them.`;
+                }
+
+                if (level1Concepts.length > 0) {
+                  instructions += `
+
+### User has only SURFACE awareness of: ${level1Concepts.join(', ')}
+Give 1-2 sentence refreshers with a concrete example before connecting to the main topic.`;
+                }
+
+                if (level2Concepts.length > 0) {
+                  instructions += `
+
+### User has working knowledge of: ${level2Concepts.join(', ')}
+Reference freely, just connect to the main topic.`;
+                }
+
+                if (level3Concepts.length > 0) {
+                  instructions += `
+
+### User is EXPERT in: ${level3Concepts.join(', ')}
+Use technical terminology. Build on their expertise.`;
+                }
+
+                prereqContext = instructions;
+              }
+            }
+
+            const immediateContextSection = immediateContext
+              ? `\n## IMPORTANT - The user selected this specific text to explore:\n"${immediateContext}"\n\nExplain the highlighted concept IN THIS CONTEXT.`
+              : '';
+
+            const parentContextSection = parentContext
+              ? `\n## Background from parent conversation:\n${parentContext}\n\nBuild on this foundation.`
+              : '';
+
+            // System prompt WITHOUT the prereqs-first section (we already have the assessment)
+            const systemPrompt = `You are a master teacher in Fork - users explore by BRANCHING into subtopics.
+
+## How Fork Works
+Users click concepts to "fork" deeper. Your job: concise explanations with MANY interesting paths to explore.
+
+## Use Your Tools!
+- **Bold terms** users might want to fork into
+- **Diagrams**: timeline (history), flowchart (relationships), sequence (processes)
+- **Charts**: for data/trends
+- **Flashcards**: for vocabulary/definitions
+- **Code blocks**: for programming
+
+## Subject Approaches
+- **History**: Surprising details, quotes, human motivation - not textbook summaries
+- **Math**: Show WHY it works, use visuals, build from simple cases
+- **Science**: Phenomena first, show it as detective work
+- **Programming**: Problem first, code primary, no-nonsense
+- **Philosophy**: Present the tension, steel-man all sides
+
+${prereqContext}
+
+${needsLongResponse ? `## RESPONSE LENGTH: LONG
+User has knowledge gaps. Teach foundational concepts THOROUGHLY before the main topic.` : `## RESPONSE LENGTH: SHORT
+2-3 paragraphs. They can branch for more.`}
+
+${expertiseContext}
+${crossThreadContext}
+${immediateContextSection}
+${parentContextSection}
+
+## End every response with:
+\`\`\`suggestions
+{"title": "Short title", "branches": ["Subtopic 1", "Subtopic 2", "Subtopic 3"], "quick_answers": ["Tell me more", "How does this work?"]}
+\`\`\`
+
+Topic: "${node.title}"`;
+
+            // Stream the response
+            const fullResponse = await streamToClaudeAPI(
+              conversationHistory,
+              apiKey,
+              model,
+              systemPrompt,
+              (partialText) => {
+                setNodes(prev => {
+                  const currentNode = prev[id];
+                  if (!currentNode) return prev;
+                  const messages = [...currentNode.messages];
+                  const lastMsg = messages[messages.length - 1];
+                  if (lastMsg && lastMsg.isStreaming) {
+                    messages[messages.length - 1] = { ...lastMsg, text: partialText };
+                  }
+                  return { ...prev, [id]: { ...currentNode, messages } };
+                });
+              }
+            );
+
+            // Parse and finalize
+            const { cleanText, suggestions } = parseAIResponse(fullResponse);
+
+            setNodes(prev => {
+              const currentNode = prev[id];
+              if (!currentNode) return prev;
+              const messages = [...currentNode.messages];
+              const lastMsg = messages[messages.length - 1];
+              if (lastMsg && lastMsg.isStreaming) {
+                messages[messages.length - 1] = {
+                  role: "assistant",
+                  text: cleanText || fullResponse,
+                  suggestions: suggestions,
+                  isStreaming: false
+                };
+              }
+              const newTitle = suggestions.title || currentNode.title;
+              return { ...prev, [id]: { ...currentNode, messages, title: newTitle } };
+            });
+
+            // Extract concepts from the response
+            if (cleanText) {
+              const concepts = extractConceptsFromText(cleanText);
+              const messageIndex = nodes[id]?.messages.length || 0;
+              updateConceptGraph(setConceptGraph, id, messageIndex, concepts);
+            }
+
+          } catch (err) {
+            console.error("API Error:", err);
+            setError(err.message || "An error occurred.");
+            setNodes(prev => {
+              const currentNode = prev[id];
+              if (!currentNode) return prev;
+              const messages = currentNode.messages.filter(m => !m.isStreaming);
+              return { ...prev, [id]: { ...currentNode, messages } };
+            });
+          } finally {
+            setIsLoading(false);
+          }
+        };
+
+        simulateAssistantRef.current = triggerAssistantResponse;
 
         const makeTitle = (parentTitle, selection) => {
           if (selection) {
@@ -2918,7 +4142,6 @@ Topic: "${node.title}"`;
         };
 
         const handleSetPrereqAssessment = (nodeId, assessment) => {
-          // First, update the node with the assessment
           setNodes(prev => {
             const node = prev[nodeId];
             if (!node) {
@@ -2926,20 +4149,34 @@ Topic: "${node.title}"`;
               return prev;
             }
 
-            // Update the node
+            // Find the last user message to re-send with prereq context
+            const lastUserMessage = [...node.messages].reverse().find(m => m.role === 'user');
+            const userQuery = lastUserMessage?.text || node.title;
+
+            // Replace the placeholder assistant message with a new streaming one
+            const messages = node.messages.filter(m =>
+              !(m.role === 'assistant' && m.text === "[Assessing your background knowledge...]")
+            );
+            messages.push({
+              role: "assistant",
+              text: "",
+              isStreaming: true
+            });
+
             const updatedNodes = {
               ...prev,
               [nodeId]: {
-                ...prev[nodeId],
+                ...node,
                 prereqAssessment: assessment,
+                messages: messages,
               }
             };
 
-            // Trigger a follow-up response after state update
+            // Trigger a fresh AI response with the prereq context
+            // Use setTimeout to ensure state is updated first
             setTimeout(() => {
-              // Send a continuation prompt - the AI will see the prereq assessment in context
-              if (handleSendRef.current) {
-                handleSendRef.current(nodeId, "Continue with my assessment.");
+              if (simulateAssistantRef.current) {
+                simulateAssistantRef.current(nodeId, userQuery, true); // true = isReassessment
               }
             }, 100);
 
@@ -3006,6 +4243,20 @@ Topic: "${node.title}"`;
           setShowPanel(false);
         };
 
+        // Handle clicking a concept in the concept map
+        const handleConceptClick = (concept) => {
+          // Navigate to the first thread where this concept appears
+          if (concept.sourceNodes && concept.sourceNodes.length > 0) {
+            const nodeId = concept.sourceNodes[0];
+            setActiveId(nodeId);
+            setShowPanel(true);
+            // Switch back to tree view to show the thread
+            setViewMode('tree');
+          }
+        };
+
+        const conceptCount = Object.keys(conceptGraph.concepts).length;
+
         return (
           <div className="app-shell">
             <Sidebar
@@ -3024,15 +4275,31 @@ Topic: "${node.title}"`;
             />
 
             <div className="main-area">
-              <TreeCanvas
-                trees={trees}
-                activeId={activeId}
-                onSelect={selectNode}
-                positions={positions}
-                transform={transform}
-                onTransformChange={setTransform}
-                onNewThread={handleNewChat}
-              />
+              {viewMode === 'tree' ? (
+                <TreeCanvas
+                  trees={trees}
+                  activeId={activeId}
+                  onSelect={selectNode}
+                  positions={positions}
+                  transform={transform}
+                  onTransformChange={setTransform}
+                  onNewThread={handleNewChat}
+                  viewMode={viewMode}
+                  onToggleView={() => setViewMode(viewMode === 'tree' ? 'concept-map' : 'tree')}
+                  conceptCount={conceptCount}
+                />
+              ) : (
+                <ConceptMapCanvas
+                  conceptGraph={conceptGraph}
+                  onConceptClick={handleConceptClick}
+                  transform={transform}
+                  onTransformChange={setTransform}
+                  onNewThread={handleNewChat}
+                  viewMode={viewMode}
+                  onToggleView={() => setViewMode(viewMode === 'tree' ? 'concept-map' : 'tree')}
+                  apiKey={apiKey}
+                />
+              )}
 
               {showPanel && (
                 <NodePanel
