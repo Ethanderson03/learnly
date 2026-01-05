@@ -1,7 +1,7 @@
 {
-  "name": "fork",
+  "name": "learnly",
   "version": "1.0.0",
-  "description": "AI-powered learning tool with branching conversations.",
+  "description": "Lightweight in-browser React prototype for branching conversations.",
   "main": "index.js",
   "type": "module",
   "scripts": {
