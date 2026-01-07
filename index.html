@@ -1774,9 +1774,19 @@
 
         const handleWheel = (e) => {
           e.preventDefault();
-          const delta = e.deltaY > 0 ? 0.9 : 1.1;
+          const rect = canvasRef.current.getBoundingClientRect();
+          const cursorX = e.clientX - rect.left;
+          const cursorY = e.clientY - rect.top;
+
+          const delta = e.deltaY > 0 ? 0.95 : 1.05; // 5% per scroll step
           const newScale = Math.max(0.3, Math.min(2, transform.scale * delta));
-          onTransformChange({ ...transform, scale: newScale });
+          const scaleFactor = newScale / transform.scale;
+
+          // Zoom towards cursor: adjust translation so cursor stays at same world position
+          const newX = cursorX - (cursorX - transform.x) * scaleFactor;
+          const newY = cursorY - (cursorY - transform.y) * scaleFactor;
+
+          onTransformChange({ x: newX, y: newY, scale: newScale });
         };
 
         useEffect(() => {
@@ -2236,7 +2246,7 @@
         const [showPanel, setShowPanel] = useState(false);
         const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
         const [mergePreview, setMergePreview] = useState(null);
-        const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+        const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
 
         // API and settings state
         const [apiKey, setApiKey] = useState(() => localStorage.getItem(STORAGE_KEY_API) || "");
