@@ -94,6 +94,7 @@ class ForkHandler(SimpleHTTPRequestHandler):
                 self.end_headers()
 
                 # Stream the response
+                chunk_count = 0
                 for line in response:
                     line = line.decode("utf-8").strip()
                     if line.startswith("data: "):
@@ -101,6 +102,7 @@ class ForkHandler(SimpleHTTPRequestHandler):
                         if event_data == "[DONE]":
                             self.wfile.write(b"data: [DONE]\n\n")
                             self.wfile.flush()
+                            print(f"[Stream] Completed - {chunk_count} chunks sent", flush=True)
                             break
 
                         try:
@@ -111,6 +113,7 @@ class ForkHandler(SimpleHTTPRequestHandler):
                                 delta = event.get("delta", {})
                                 if delta.get("type") == "text_delta":
                                     text = delta.get("text", "")
+                                    chunk_count += 1
                                     # Send the text chunk
                                     chunk_data = json.dumps({"type": "text", "text": text})
                                     self.wfile.write(f"data: {chunk_data}\n\n".encode("utf-8"))
@@ -119,10 +122,19 @@ class ForkHandler(SimpleHTTPRequestHandler):
                             elif event_type == "message_stop":
                                 self.wfile.write(b"data: [DONE]\n\n")
                                 self.wfile.flush()
+                                print(f"[Stream] Completed (message_stop) - {chunk_count} chunks sent", flush=True)
                                 break
 
-                        except json.JSONDecodeError:
-                            pass
+                            elif event_type == "error":
+                                error_msg = event.get("error", {}).get("message", "Unknown error")
+                                print(f"[Stream] API error: {error_msg}", flush=True)
+                                error_chunk = json.dumps({"type": "error", "error": error_msg})
+                                self.wfile.write(f"data: {error_chunk}\n\n".encode("utf-8"))
+                                self.wfile.flush()
+                                break
+
+                        except json.JSONDecodeError as e:
+                            print(f"[Stream] JSON decode error: {e} for data: {event_data[:100]}", flush=True)
 
                 response.close()
 

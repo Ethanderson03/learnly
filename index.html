@@ -282,11 +282,36 @@
         const decoder = new TextDecoder();
         let fullText = "";
         let buffer = "";
+        let lastChunkTime = Date.now();
+        const STREAM_TIMEOUT = 30000; // 30 second timeout between chunks
 
         while (true) {
-          const { done, value } = await reader.read();
+          // Create a timeout promise
+          const timeoutPromise = new Promise((_, reject) => {
+            const elapsed = Date.now() - lastChunkTime;
+            const remaining = Math.max(0, STREAM_TIMEOUT - elapsed);
+            setTimeout(() => reject(new Error('Stream timeout - no data received for 30 seconds')), remaining);
+          });
+
+          // Race between reading and timeout
+          let result;
+          try {
+            result = await Promise.race([reader.read(), timeoutPromise]);
+          } catch (timeoutError) {
+            console.error("[API] Stream timeout");
+            reader.cancel();
+            if (fullText.length > 0) {
+              // Return partial response if we have some content
+              console.log("[API] Returning partial response:", fullText.length, "chars");
+              return fullText;
+            }
+            throw timeoutError;
+          }
+
+          const { done, value } = result;
           if (done) break;
 
+          lastChunkTime = Date.now(); // Reset timeout on each chunk
           const chunk = decoder.decode(value, { stream: true });
           buffer += chunk;
 
@@ -297,6 +322,7 @@
             if (line.startsWith("data: ")) {
               const data = line.slice(6);
               if (data === "[DONE]") {
+                console.log("[API] Stream complete, total length:", fullText.length);
                 return fullText;
               }
 
@@ -315,6 +341,7 @@
           }
         }
 
+        console.log("[API] Stream ended, total length:", fullText.length);
         return fullText;
       };
 
