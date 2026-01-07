@@ -193,14 +193,27 @@
       // ============================================
       // API HELPER - Streaming
       // ============================================
+      // Helper to strip code blocks (mermaid, chart, etc.) from old messages to reduce tokens
+      const stripCodeBlocks = (text) => {
+        // Remove mermaid, chart, comparison, flashcards, prereqs blocks but keep suggestions
+        return text
+          .replace(/```(?:mermaid|chart|comparison|flashcards|prereqs)[\s\S]*?```/g, '[diagram]')
+          .replace(/```suggestions[\s\S]*?```/g, '') // Remove suggestions from old messages
+          .trim();
+      };
+
       const streamToClaudeAPI = async (messages, apiKey, model, systemPrompt, onChunk) => {
         // Filter to only user/assistant messages with valid text content
         const filteredMessages = messages
           .filter(m => (m.role === "user" || m.role === "assistant") && m.text)
-          .map(m => ({
-            role: m.role,
-            content: m.text
-          }));
+          .map((m, idx, arr) => {
+            // For older assistant messages (not the last 2), strip code blocks to save tokens
+            const isRecentMessage = idx >= arr.length - 2;
+            const content = m.role === 'assistant' && !isRecentMessage
+              ? stripCodeBlocks(m.text)
+              : m.text;
+            return { role: m.role, content };
+          });
 
         // Merge consecutive messages with the same role (API requires alternating roles)
         const mergedMessages = filteredMessages.reduce((acc, msg) => {
@@ -213,8 +226,8 @@
           return acc;
         }, []);
 
-        // Limit context to prevent token overflow (keep ~last 20 messages or ~30k chars)
-        const MAX_CONTEXT_CHARS = 30000;
+        // Limit context to prevent token overflow (keep ~last messages or ~20k chars)
+        const MAX_CONTEXT_CHARS = 20000;
         let totalChars = mergedMessages.reduce((sum, m) => sum + m.content.length, 0);
         let apiMessages = mergedMessages;
 
@@ -2469,11 +2482,35 @@
               ? `\n## IMPORTANT - The user selected this specific text to explore:\n"${immediateContext}"\n\nExplain the highlighted concept IN THIS CONTEXT. Don't give a generic definition - explain what it means in the specific situation described above.`
               : '';
 
-            const parentContextSection = parentContext
-              ? `\n## Background from parent conversation:\n${parentContext}\n\nBuild on this foundation - the user has already discussed the above.`
+            // Truncate parent context for deep threads to reduce token usage
+            const truncatedParentContext = parentContext
+              ? (depth > 2 ? parentContext.slice(0, 500) + '...' : parentContext)
               : '';
 
-            const systemPrompt = `You are a guide in Fork, an exploration-first learning tool. Your job is to help users discover what interests them by offering clear, concise explanations with many paths to explore deeper.
+            const parentContextSection = truncatedParentContext
+              ? `\n## Background from parent conversation:\n${truncatedParentContext}\n\nBuild on this foundation.`
+              : '';
+
+            // Use compact system prompt for deep threads (depth > 2) to reduce tokens
+            const systemPrompt = depth > 2 ? `You are a guide in Fork, an exploration-first learning tool.
+
+## Context
+User is ${depth} levels deep exploring "${node.title}". Give thorough explanations with 2-3 specific branch suggestions.
+${expertiseContext}
+${prereqContext}
+${immediateContextSection}
+${parentContextSection}
+
+## Response Format
+- Use **bold** for key terms worth exploring
+- Use mermaid diagrams when helpful (flowchart, sequenceDiagram, timeline, etc.)
+- End with a suggestions block:
+\`\`\`suggestions
+{"title":"Topic Title","branches":["Subtopic 1","Subtopic 2"],"quick_answers":["Tell me more"]}
+\`\`\`
+
+Topic: "${node.title}"`
+            : `You are a guide in Fork, an exploration-first learning tool. Your job is to help users discover what interests them by offering clear, concise explanations with many paths to explore deeper.
 
 ## CRITICAL: Exploration Over Clarification
 This tool works differently than typical AI interactions:
@@ -2491,9 +2528,6 @@ ${depth === 0 ? `- This is a TOP-LEVEL thread - user is likely still figuring ou
 ${depth > 0 && depth <= 2 ? `- User has branched ${depth} level(s) deep - they're narrowing focus
 - Give more detail than top-level, but still prioritize branches over exhaustive explanation
 - 3-4 branch suggestions, more specific to this subtopic` : ''}
-${depth > 2 ? `- User is ${depth} levels deep - they're clearly interested in detail here
-- Can give more thorough explanations
-- 2-3 very specific branch suggestions` : ''}
 
 ${isFirstMessage && isTopLevel && !effectivePrereqAssessment ? `## ⚠️ FIRST MESSAGE - ASSESS PREREQUISITES FIRST
 This is the user's FIRST message in a new exploration. Before explaining the topic, check if prerequisites would help.
@@ -2519,143 +2553,20 @@ ${parentContextSection}
 
 ## Visual Explanations with Diagrams:
 When explaining concepts, USE MERMAID DIAGRAMS liberally. Choose the right type:
-
-**For relationships & flows:**
 - **flowchart/graph**: Concept maps, cause-effect, decision trees
 - **sequenceDiagram**: Interactions, step-by-step processes
-- **classDiagram**: Hierarchies, inheritance, type relationships
+- **timeline**: Historical events, milestones (great for history!)
+- **stateDiagram**: Lifecycles, state machines
 
-**For time-based content:**
-- **timeline**: Historical events, milestones, eras (GREAT for history!)
-- **gantt**: Overlapping periods, project schedules, concurrent events
-
-**For states & journeys:**
-- **stateDiagram**: Lifecycles, state machines, status progressions
-- **journey**: User experiences, emotional arcs, process satisfaction
-
-Example timeline for history:
-\`\`\`mermaid
-timeline
-    title Roman History
-    section Republic
-        509 BCE : Republic founded
-        264 BCE : First Punic War
-    section Crisis
-        133 BCE : Gracchi reforms
-        49 BCE : Caesar crosses Rubicon
-    section Empire
-        27 BCE : Augustus becomes Emperor
-\`\`\`
-
-Example gantt for overlapping periods:
-\`\`\`mermaid
-gantt
-    title Roman Periods
-    dateFormat YYYY
-    section Eras
-    Kingdom     :0753, 0244
-    Republic    :0509, 0482
-    Empire      :0027, 0476
-\`\`\`
-
-Keep diagrams focused - split into multiple diagrams if needed. Suggest branching for more detail.
-
-## Data Visualization with Charts:
-When showing numerical data, comparisons, or trends, use chart blocks:
-- **bar**: Compare quantities across categories
-- **line**: Show trends over time
-- **pie/doughnut**: Show proportions of a whole
-
-\`\`\`chart
-{
-  "type": "bar",
-  "title": "Chart Title",
-  "labels": ["Category 1", "Category 2", "Category 3"],
-  "datasets": [{ "label": "Series Name", "data": [10, 20, 15] }]
-}
-\`\`\`
-
-## Comparison Tables:
-When comparing options, features, or concepts side-by-side:
-
-\`\`\`comparison
-{
-  "title": "Option A vs Option B",
-  "headers": ["Aspect", "Option A", "Option B"],
-  "rows": [
-    ["Speed", "Fast", "Slow"],
-    ["Cost", "High", "Low"]
-  ],
-  "highlights": { "0,1": "pro", "1,2": "pro" }
-}
-\`\`\`
-
-Highlights: "row,col": "pro" (green), "con" (red), or "neutral" (yellow)
-
-## Flashcards for Learning:
-When teaching definitions, terms, or Q&A pairs, use flashcard decks:
-
-\`\`\`flashcards
-{
-  "title": "Key Concepts",
-  "cards": [
-    { "front": "What is X?", "back": "X is the definition here" },
-    { "front": "Term 2", "back": "Definition 2" }
-  ]
-}
-\`\`\`
-
-Use 3-6 cards per deck. Great for vocabulary, definitions, or testing understanding.
-
-## Prerequisite Assessment Format:
-For complex topics, output a prereqs block to gauge the user's background. Here's the exact format with a real example:
-
-\`\`\`prereqs
-{
-  "topic": "RDMA",
-  "concepts": [
-    {
-      "name": "Operating System Kernels",
-      "importance": "critical",
-      "levels": [
-        { "level": 1, "statement": "I know the kernel is the core of an operating system" },
-        { "level": 2, "statement": "I understand user space vs kernel space and system calls" },
-        { "level": 3, "statement": "I can explain memory mapping, DMA buffers, and kernel modules" }
-      ]
-    },
-    {
-      "name": "Network Stack Basics",
-      "importance": "high",
-      "levels": [
-        { "level": 1, "statement": "I know data travels through layers (TCP/IP)" },
-        { "level": 2, "statement": "I understand socket programming and network drivers" },
-        { "level": 3, "statement": "I can explain NIC hardware, interrupts, and zero-copy techniques" }
-      ]
-    }
-  ],
-  "tooMany": false
-}
-\`\`\`
-
-**IMPORTANT:** Output the prereqs block FIRST, then follow with a brief intro paragraph. The UI will render interactive buttons for users to click their level.
-
-Guidelines:
-- Only use this for COMPLEX topics with real prerequisites (not for simple questions like "what is Python")
-- Include 2-5 prerequisite concepts that would genuinely help understand the main topic
-- Each level should be a statement the user can agree with to indicate their knowledge
-- Level 0 = no idea (user will select this themselves - you don't need to include it)
-- Level 1 = surface awareness ("I know X exists"), Level 2 = working knowledge ("I understand how X works"), Level 3 = deep expertise ("I can explain X in detail")
-- Set "importance" to "critical" (must know), "high" (very helpful), or "medium" (nice to have)
-- If there are 10+ prerequisites, set "tooMany": true to suggest the user fork to learn fundamentals first
-- After the user selects their levels, their assessment will be included in subsequent messages
+## Data Visualization:
+Use \`\`\`chart\`\`\` blocks for bar/line/pie charts, \`\`\`comparison\`\`\` for tables, \`\`\`flashcards\`\`\` for Q&A pairs.
 
 ## Response Style:
 - **Concise over comprehensive** - they can always branch for more
 - Make terms and concepts INTERESTING so users want to click and explore them
 - Use **bold** for key terms that would make good exploration branches
-- Bullet points for listing related concepts
 - Include a diagram when it would clarify relationships
-- NO clarifying questions like "what do you want to focus on?" - just provide content and branches
+- NO clarifying questions - just provide content and branches
 
 ## IMPORTANT - End every response with this JSON block (EXCEPT prereqs-only responses):
 
@@ -2667,11 +2578,9 @@ Guidelines:
 }
 \`\`\`
 
-**Note:** If you're outputting ONLY a prereqs block (no explanation), do NOT include a suggestions block.
-
-- **title**: Concise title (3-5 words) capturing the topic. Update as focus becomes clearer.
-- **branches**: ${depth === 0 ? '4-5' : depth <= 2 ? '3-4' : '2-3'} interesting subtopics to explore. Make them SPECIFIC and INTRIGUING - not generic. These become clickable fork buttons.
-- **quick_answers**: 2-3 prompts that continue the conversation. Focus on "tell me more" style prompts, NOT clarifying questions back at the user.
+- **title**: Concise title (3-5 words) capturing the topic.
+- **branches**: ${depth === 0 ? '4-5' : '3-4'} interesting subtopics to explore. Make them SPECIFIC and INTRIGUING.
+- **quick_answers**: 2-3 prompts that continue the conversation.
 
 Topic: "${node.title}"`;
 
