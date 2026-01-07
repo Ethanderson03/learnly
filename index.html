@@ -24,102 +24,102 @@
     <script type="text/babel">
       const { useEffect, useState, useMemo, useRef, useCallback } = React;
 
-      // Initialize Mermaid with dark theme - comprehensive settings for all diagram types
+      // Initialize Mermaid with cream academic theme
       mermaid.initialize({
         startOnLoad: false,
-        theme: 'dark',
+        theme: 'base',
         themeVariables: {
-          // Core colors
-          primaryColor: '#4a9eff',
-          primaryTextColor: '#f0f0f0',
-          primaryBorderColor: '#4a9eff',
-          lineColor: '#888888',
-          secondaryColor: '#2a2a2a',
-          tertiaryColor: '#333333',
-          background: '#111111',
-          mainBkg: '#1e1e1e',
-          nodeBorder: '#4a9eff',
-          clusterBkg: '#222222',
-          clusterBorder: '#444444',
-          titleColor: '#f0f0f0',
-          edgeLabelBackground: '#1a1a1a',
+          // Core colors - warm cream tones
+          primaryColor: '#e8dfd3',
+          primaryTextColor: '#3d3529',
+          primaryBorderColor: '#7c6f5b',
+          lineColor: '#9a8b78',
+          secondaryColor: '#f0ebe3',
+          tertiaryColor: '#f5f0e8',
+          background: '#ffffff',
+          mainBkg: '#f5f0e8',
+          nodeBorder: '#7c6f5b',
+          clusterBkg: '#f0ebe3',
+          clusterBorder: '#c8bdb0',
+          titleColor: '#3d3529',
+          edgeLabelBackground: '#ffffff',
 
-          // Text colors - ensure high contrast
-          textColor: '#f0f0f0',
-          nodeTextColor: '#f0f0f0',
-          labelTextColor: '#f0f0f0',
+          // Text colors - warm browns
+          textColor: '#3d3529',
+          nodeTextColor: '#3d3529',
+          labelTextColor: '#3d3529',
 
           // Sequence diagram
-          actorTextColor: '#f0f0f0',
-          actorBkg: '#2a2a2a',
-          actorBorder: '#4a9eff',
-          actorLineColor: '#666666',
-          signalColor: '#f0f0f0',
-          signalTextColor: '#f0f0f0',
-          labelBoxBkgColor: '#2a2a2a',
-          labelBoxBorderColor: '#4a9eff',
-          noteBkgColor: '#333333',
-          noteTextColor: '#f0f0f0',
-          noteBorderColor: '#555555',
-          activationBkgColor: '#3a3a3a',
-          activationBorderColor: '#4a9eff',
-          sequenceNumberColor: '#f0f0f0',
+          actorTextColor: '#3d3529',
+          actorBkg: '#f5f0e8',
+          actorBorder: '#7c6f5b',
+          actorLineColor: '#9a8b78',
+          signalColor: '#3d3529',
+          signalTextColor: '#3d3529',
+          labelBoxBkgColor: '#f5f0e8',
+          labelBoxBorderColor: '#7c6f5b',
+          noteBkgColor: '#e8dfd3',
+          noteTextColor: '#3d3529',
+          noteBorderColor: '#c8bdb0',
+          activationBkgColor: '#e8dfd3',
+          activationBorderColor: '#7c6f5b',
+          sequenceNumberColor: '#3d3529',
 
           // Gantt chart
-          sectionBkgColor: '#2a2a2a',
-          sectionBkgColor2: '#333333',
-          gridColor: '#444444',
-          todayLineColor: '#4a9eff',
-          taskTextColor: '#f0f0f0',
-          taskTextOutsideColor: '#f0f0f0',
-          taskTextLightColor: '#f0f0f0',
-          taskTextDarkColor: '#1a1a1a',
-          taskBkgColor: '#4a9eff',
-          activeTaskBkgColor: '#5ab0ff',
-          doneTaskBkgColor: '#2d7a4d',
-          critBkgColor: '#a04040',
-          taskBorderColor: '#555555',
+          sectionBkgColor: '#f0ebe3',
+          sectionBkgColor2: '#e8dfd3',
+          gridColor: '#d4cbbf',
+          todayLineColor: '#7c6f5b',
+          taskTextColor: '#3d3529',
+          taskTextOutsideColor: '#3d3529',
+          taskTextLightColor: '#ffffff',
+          taskTextDarkColor: '#3d3529',
+          taskBkgColor: '#7c6f5b',
+          activeTaskBkgColor: '#5d7a5d',
+          doneTaskBkgColor: '#5d7a5d',
+          critBkgColor: '#a65d5d',
+          taskBorderColor: '#c8bdb0',
 
           // State diagram
-          labelColor: '#f0f0f0',
-          altBackground: '#2a2a2a',
+          labelColor: '#3d3529',
+          altBackground: '#f0ebe3',
 
-          // Journey diagram
-          fillType0: '#2a4a6a',
-          fillType1: '#3a5a7a',
-          fillType2: '#4a6a8a',
-          fillType3: '#5a7a9a',
-          fillType4: '#3a6a5a',
-          fillType5: '#4a7a6a',
-          fillType6: '#5a8a7a',
-          fillType7: '#6a9a8a',
+          // Journey diagram - muted earthy tones
+          fillType0: '#7c6f5b',
+          fillType1: '#5d7a5d',
+          fillType2: '#b8945f',
+          fillType3: '#5d7a7a',
+          fillType4: '#7a6a8a',
+          fillType5: '#8a7a6a',
+          fillType6: '#6a8a7a',
+          fillType7: '#7a8a6a',
 
-          // Pie chart
-          pie1: '#4a9eff',
-          pie2: '#5ab8a0',
-          pie3: '#e8a060',
-          pie4: '#d070a0',
-          pie5: '#8070d0',
-          pie6: '#60c0c0',
-          pie7: '#c0a060',
-          pieTitleTextColor: '#f0f0f0',
-          pieSectionTextColor: '#f0f0f0',
-          pieLegendTextColor: '#f0f0f0',
-          pieStrokeColor: '#333333',
+          // Pie chart - scholarly earth tones
+          pie1: '#7c6f5b',
+          pie2: '#5d7a5d',
+          pie3: '#b8945f',
+          pie4: '#a65d5d',
+          pie5: '#7a6a8a',
+          pie6: '#5d7a7a',
+          pie7: '#8a7a6a',
+          pieTitleTextColor: '#3d3529',
+          pieSectionTextColor: '#ffffff',
+          pieLegendTextColor: '#3d3529',
+          pieStrokeColor: '#ffffff',
 
-          // Timeline
-          cScale0: '#4a9eff',
-          cScale1: '#5ab8a0',
-          cScale2: '#e8a060',
-          cScale3: '#d070a0',
-          cScale4: '#8070d0',
-          cScale5: '#60c0c0',
-          cScaleLabel0: '#f0f0f0',
-          cScaleLabel1: '#f0f0f0',
-          cScaleLabel2: '#1a1a1a',
-          cScaleLabel3: '#f0f0f0',
-          cScaleLabel4: '#f0f0f0',
-          cScaleLabel5: '#1a1a1a',
+          // Timeline - coordinated colors
+          cScale0: '#7c6f5b',
+          cScale1: '#5d7a5d',
+          cScale2: '#b8945f',
+          cScale3: '#5d7a7a',
+          cScale4: '#7a6a8a',
+          cScale5: '#8a7a6a',
+          cScaleLabel0: '#ffffff',
+          cScaleLabel1: '#ffffff',
+          cScaleLabel2: '#3d3529',
+          cScaleLabel3: '#ffffff',
+          cScaleLabel4: '#ffffff',
+          cScaleLabel5: '#3d3529',
         },
         flowchart: {
           curve: 'basis',
@@ -178,9 +178,9 @@
       };
 
       const MODELS = [
-        { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4", description: "Best balance of speed and intelligence" },
-        { id: "claude-3-5-sonnet-20241022", name: "Claude 3.5 Sonnet", description: "Fast and capable" },
-        { id: "claude-3-5-haiku-20241022", name: "Claude 3.5 Haiku", description: "Fastest, great for quick responses" },
+        { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4", description: "Latest and best" },
+        { id: "claude-3-5-sonnet-latest", name: "Claude 3.5 Sonnet", description: "Fast and capable" },
+        { id: "claude-3-5-haiku-latest", name: "Claude 3.5 Haiku", description: "Fastest responses" },
       ];
 
       const initialRootMessages = [
@@ -282,24 +282,13 @@
         const decoder = new TextDecoder();
         let fullText = "";
         let buffer = "";
-        let chunkCount = 0;
-
-        console.log("[API] Starting to read stream...");
 
         while (true) {
           const { done, value } = await reader.read();
-          if (done) {
-            console.log("[API] Stream done, total chunks:", chunkCount, "text length:", fullText.length);
-            break;
-          }
+          if (done) break;
 
           const chunk = decoder.decode(value, { stream: true });
           buffer += chunk;
-          chunkCount++;
-
-          if (chunkCount <= 3) {
-            console.log("[API] Chunk", chunkCount, ":", chunk.slice(0, 100));
-          }
 
           const lines = buffer.split("\n");
           buffer = lines.pop() || "";
@@ -308,7 +297,6 @@
             if (line.startsWith("data: ")) {
               const data = line.slice(6);
               if (data === "[DONE]") {
-                console.log("[API] Received [DONE]");
                 return fullText;
               }
 
@@ -318,19 +306,15 @@
                   fullText += parsed.text;
                   onChunk(fullText);
                 } else if (parsed.type === "error") {
-                  console.error("[API] Stream error:", parsed.error);
                   throw new Error(parsed.error);
                 }
               } catch (e) {
-                if (e.message && !e.message.includes("Unexpected")) {
-                  console.warn("[API] Parse error:", e.message, "data:", data.slice(0, 50));
-                }
+                // Ignore parse errors for partial JSON
               }
             }
           }
         }
 
-        console.log("[API] Stream ended, returning text length:", fullText.length);
         return fullText;
       };
 
@@ -451,6 +435,78 @@
         return { cleanText, suggestions, prereqs };
       };
 
+      // Lightbox with pan and zoom
+      function DiagramLightbox({ svg, onClose }) {
+        const [scale, setScale] = useState(1);
+        const [position, setPosition] = useState({ x: 0, y: 0 });
+        const [isDragging, setIsDragging] = useState(false);
+        const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+        const containerRef = useRef(null);
+
+        const handleWheel = (e) => {
+          e.preventDefault();
+          const delta = e.deltaY > 0 ? 0.9 : 1.1;
+          setScale(prev => Math.min(Math.max(0.25, prev * delta), 4));
+        };
+
+        const handleMouseDown = (e) => {
+          if (e.button === 0) {
+            setIsDragging(true);
+            setDragStart({ x: e.clientX - position.x, y: e.clientY - position.y });
+          }
+        };
+
+        const handleMouseMove = (e) => {
+          if (isDragging) {
+            setPosition({
+              x: e.clientX - dragStart.x,
+              y: e.clientY - dragStart.y
+            });
+          }
+        };
+
+        const handleMouseUp = () => setIsDragging(false);
+
+        const resetView = () => {
+          setScale(1);
+          setPosition({ x: 0, y: 0 });
+        };
+
+        return (
+          <div className="lightbox-overlay" onClick={onClose}>
+            <div className="lightbox-content" onClick={(e) => e.stopPropagation()}>
+              <div className="lightbox-controls">
+                <button onClick={() => setScale(s => Math.min(s * 1.2, 4))} title="Zoom in">+</button>
+                <span className="lightbox-zoom-level">{Math.round(scale * 100)}%</span>
+                <button onClick={() => setScale(s => Math.max(s * 0.8, 0.25))} title="Zoom out">−</button>
+                <button onClick={resetView} title="Reset view">⟲</button>
+                <button className="lightbox-close" onClick={onClose}>✕</button>
+              </div>
+              <div
+                ref={containerRef}
+                className="lightbox-viewport"
+                onWheel={handleWheel}
+                onMouseDown={handleMouseDown}
+                onMouseMove={handleMouseMove}
+                onMouseUp={handleMouseUp}
+                onMouseLeave={handleMouseUp}
+                style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
+              >
+                <div
+                  className="lightbox-diagram"
+                  style={{
+                    transform: `translate(${position.x}px, ${position.y}px) scale(${scale})`,
+                    transformOrigin: 'center center'
+                  }}
+                  dangerouslySetInnerHTML={{ __html: svg }}
+                />
+              </div>
+              <p className="lightbox-hint">Scroll to zoom • Drag to pan</p>
+            </div>
+          </div>
+        );
+      }
+
       // Mermaid Diagram Component with clickable nodes and lightbox
       function MermaidDiagram({ chart, id, onNodeClick }) {
         const containerRef = useRef(null);
@@ -544,15 +600,7 @@
             </div>
 
             {showLightbox && ReactDOM.createPortal(
-              <div className="lightbox-overlay" onClick={() => setShowLightbox(false)}>
-                <div className="lightbox-content" onClick={(e) => e.stopPropagation()}>
-                  <button className="lightbox-close" onClick={() => setShowLightbox(false)}>✕</button>
-                  <div
-                    className="lightbox-diagram"
-                    dangerouslySetInnerHTML={{ __html: svg }}
-                  />
-                </div>
-              </div>,
+              <DiagramLightbox svg={svg} onClose={() => setShowLightbox(false)} />,
               document.getElementById('portal-root')
             )}
           </>
@@ -1445,32 +1493,48 @@
       // ============================================
       function PrereqAssessment({ prereqs, onComplete, onForkPrereq }) {
         const [selections, setSelections] = useState({});
+        const [currentIndex, setCurrentIndex] = useState(0);
 
         if (!prereqs || !prereqs.concepts) return null;
 
         const { topic, concepts, tooMany } = prereqs;
+        const currentConcept = concepts[currentIndex];
+        const isLastConcept = currentIndex === concepts.length - 1;
         const allSelected = concepts.every(c => selections[c.name] !== undefined);
 
         const handleSelect = (conceptName, level) => {
           setSelections(prev => ({ ...prev, [conceptName]: level }));
         };
 
-        const handleContinue = () => {
-          if (allSelected) {
-            onComplete(selections);
+        const handleNext = () => {
+          if (selections[currentConcept.name] !== undefined) {
+            if (isLastConcept) {
+              onComplete(selections);
+            } else {
+              setCurrentIndex(prev => prev + 1);
+            }
           }
         };
+
+        const handleBack = () => {
+          if (currentIndex > 0) {
+            setCurrentIndex(prev => prev - 1);
+          }
+        };
+
+        const currentSelected = selections[currentConcept.name] !== undefined;
 
         return (
           <div className="prereq-assessment">
             <div className="prereq-header">
-              <span className="prereq-icon">🎯</span>
+              <span className="prereq-icon">📚</span>
               <span className="prereq-title">
-                Before diving into <strong>{topic}</strong>, let's gauge your background
+                Before diving into <strong>{topic}</strong>
               </span>
+              <span className="prereq-progress">{currentIndex + 1} of {concepts.length}</span>
             </div>
 
-            {tooMany && (
+            {tooMany && currentIndex === 0 && (
               <div className="prereq-warning">
                 <span className="warning-icon">⚠️</span>
                 This topic has many prerequisites. Consider exploring foundational concepts first.
@@ -1478,56 +1542,60 @@
             )}
 
             <div className="prereq-concepts">
-              {concepts.map((concept) => (
-                <div key={concept.name} className="prereq-card">
-                  <div className="prereq-concept-header">
-                    <span className="concept-name">{concept.name}</span>
-                    {concept.importance === 'critical' && (
-                      <span className="importance-badge critical">Critical</span>
-                    )}
-                    {concept.importance === 'high' && (
-                      <span className="importance-badge high">Important</span>
-                    )}
-                  </div>
-                  <div className="prereq-statements">
-                    {/* Level 0 - hardcoded "no idea" option */}
-                    <button
-                      className={`prereq-statement level-zero ${selections[concept.name] === 0 ? 'selected' : ''}`}
-                      onClick={() => handleSelect(concept.name, 0)}
-                    >
-                      <span className="statement-level">L0</span>
-                      <span className="statement-text">I have no idea what this is</span>
-                    </button>
-                    {concept.levels.map((lvl) => (
-                      <button
-                        key={lvl.level}
-                        className={`prereq-statement ${selections[concept.name] === lvl.level ? 'selected' : ''}`}
-                        onClick={() => handleSelect(concept.name, lvl.level)}
-                      >
-                        <span className="statement-level">L{lvl.level}</span>
-                        <span className="statement-text">{lvl.statement}</span>
-                      </button>
-                    ))}
-                  </div>
-                  {tooMany && (
-                    <button
-                      className="prereq-fork-btn"
-                      onClick={() => onForkPrereq(concept.name)}
-                    >
-                      ↳ Learn {concept.name} first
-                    </button>
+              <div className="prereq-card active">
+                <div className="prereq-concept-header">
+                  <span className="concept-name">{currentConcept.name}</span>
+                  {currentConcept.importance === 'critical' && (
+                    <span className="importance-badge critical">Critical</span>
+                  )}
+                  {currentConcept.importance === 'high' && (
+                    <span className="importance-badge high">Important</span>
                   )}
                 </div>
-              ))}
+                <p className="prereq-question">How familiar are you with this concept?</p>
+                <div className="prereq-statements">
+                  {/* Level 0 - hardcoded "no idea" option */}
+                  <button
+                    className={`prereq-statement level-zero ${selections[currentConcept.name] === 0 ? 'selected' : ''}`}
+                    onClick={() => handleSelect(currentConcept.name, 0)}
+                  >
+                    <span className="statement-text">I haven't encountered this before</span>
+                  </button>
+                  {currentConcept.levels.map((lvl) => (
+                    <button
+                      key={lvl.level}
+                      className={`prereq-statement ${selections[currentConcept.name] === lvl.level ? 'selected' : ''}`}
+                      onClick={() => handleSelect(currentConcept.name, lvl.level)}
+                    >
+                      <span className="statement-text">{lvl.statement}</span>
+                    </button>
+                  ))}
+                </div>
+                {tooMany && (
+                  <button
+                    className="prereq-fork-btn"
+                    onClick={() => onForkPrereq(currentConcept.name)}
+                  >
+                    ↳ Learn {currentConcept.name} first
+                  </button>
+                )}
+              </div>
             </div>
 
-            <button
-              className={`prereq-continue-btn ${allSelected ? 'ready' : ''}`}
-              onClick={handleContinue}
-              disabled={!allSelected}
-            >
-              {allSelected ? 'Continue with explanation →' : `Select your level for each concept (${Object.keys(selections).length}/${concepts.length})`}
-            </button>
+            <div className="prereq-nav">
+              {currentIndex > 0 && (
+                <button className="prereq-back-btn" onClick={handleBack}>
+                  ← Back
+                </button>
+              )}
+              <button
+                className={`prereq-continue-btn ${currentSelected ? 'ready' : ''}`}
+                onClick={handleNext}
+                disabled={!currentSelected}
+              >
+                {isLastConcept ? 'Continue →' : 'Next →'}
+              </button>
+            </div>
           </div>
         );
       }
@@ -2310,7 +2378,7 @@
           return `Building on ${parent.title}'s context. ${context ? `Considering: "${context.slice(0, 100)}..."` : ''} Here's a thoughtful exploration of "${question}".`;
         };
 
-        const handleSend = async (id, text) => {
+        const handleSend = async (id, text, overridePrereqAssessment = null) => {
           // Guard: check node exists
           const node = nodes[id];
           if (!node) {
@@ -2333,6 +2401,8 @@
           const conversationHistory = [...node.messages, { role: "user", text }];
           const depth = nodesById[id]?.depth || 0;
           const expertiseLevel = node.expertiseLevel;
+          // Use override if provided (handles race condition with prereq assessment)
+          const effectivePrereqAssessment = overridePrereqAssessment || node.prereqAssessment;
 
           console.log("[handleSend] Node:", id, "Depth:", depth, "Messages in history:", conversationHistory.length);
 
@@ -2358,8 +2428,8 @@
                 ? `This is the start of a new topic. Gauge their familiarity level before diving deep.`
                 : '';
 
-            const prereqContext = node.prereqAssessment
-              ? `\n## User's Prerequisite Knowledge Assessment:\n${Object.entries(node.prereqAssessment)
+            const prereqContext = effectivePrereqAssessment
+              ? `\n## User's Prerequisite Knowledge Assessment:\n${Object.entries(effectivePrereqAssessment)
                   .map(([concept, level]) => `- ${concept}: Level ${level}/3 (0=no idea, 1=surface, 2=working, 3=deep)`)
                   .join('\n')}\n\nTailor your explanation: For level 0, explain the prerequisite from scratch. Fill gaps for level 1-2 concepts. Skip basics for level 3 concepts.`
               : '';
@@ -2398,7 +2468,7 @@ ${depth > 2 ? `- User is ${depth} levels deep - they're clearly interested in de
 - Can give more thorough explanations
 - 2-3 very specific branch suggestions` : ''}
 
-${isFirstMessage && isTopLevel && !node.prereqAssessment ? `## ⚠️ FIRST MESSAGE - ASSESS PREREQUISITES FIRST
+${isFirstMessage && isTopLevel && !effectivePrereqAssessment ? `## ⚠️ FIRST MESSAGE - ASSESS PREREQUISITES FIRST
 This is the user's FIRST message in a new exploration. Before explaining the topic, check if prerequisites would help.
 
 **If the topic has significant foundational concepts** (e.g., RDMA, Kubernetes, distributed systems, ML architectures):
@@ -2882,11 +2952,11 @@ Topic: "${node.title}"`;
               }
             };
 
-            // Trigger a follow-up response after state update
+            // Trigger a follow-up response - pass assessment directly to avoid race condition
             setTimeout(() => {
-              // Send a continuation prompt - the AI will see the prereq assessment in context
+              // Send a continuation prompt with assessment passed directly
               if (handleSendRef.current) {
-                handleSendRef.current(nodeId, "Continue with my assessment.");
+                handleSendRef.current(nodeId, "Now explain the topic based on my background assessment.", assessment);
               }
             }, 100);
 

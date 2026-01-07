@@ -43,6 +43,7 @@ class ForkHandler(SimpleHTTPRequestHandler):
 
             # Get API key from request header
             api_key = self.headers.get("X-API-Key")
+            print(f"[Stream] API key received: {api_key[:10] if api_key else 'NONE'}...", flush=True)
             if not api_key:
                 print("[Stream] ERROR: Missing API key")
                 self.send_json_error(400, "Missing API key")
@@ -78,7 +79,13 @@ class ForkHandler(SimpleHTTPRequestHandler):
             )
 
             try:
-                # Send SSE headers
+                print(f"[Stream] Connecting to Anthropic API...", flush=True)
+
+                # Make request FIRST to catch errors before sending headers
+                response = urllib.request.urlopen(req, timeout=120)
+                print(f"[Stream] Connected! Status: {response.status}", flush=True)
+
+                # Send SSE headers only after successful connection
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
                 self.send_header("Cache-Control", "no-cache")
@@ -86,37 +93,38 @@ class ForkHandler(SimpleHTTPRequestHandler):
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
 
-                with urllib.request.urlopen(req, timeout=120) as response:
-                    # Stream the response
-                    for line in response:
-                        line = line.decode("utf-8").strip()
-                        if line.startswith("data: "):
-                            event_data = line[6:]
-                            if event_data == "[DONE]":
+                # Stream the response
+                for line in response:
+                    line = line.decode("utf-8").strip()
+                    if line.startswith("data: "):
+                        event_data = line[6:]
+                        if event_data == "[DONE]":
+                            self.wfile.write(b"data: [DONE]\n\n")
+                            self.wfile.flush()
+                            break
+
+                        try:
+                            event = json.loads(event_data)
+                            event_type = event.get("type")
+
+                            if event_type == "content_block_delta":
+                                delta = event.get("delta", {})
+                                if delta.get("type") == "text_delta":
+                                    text = delta.get("text", "")
+                                    # Send the text chunk
+                                    chunk_data = json.dumps({"type": "text", "text": text})
+                                    self.wfile.write(f"data: {chunk_data}\n\n".encode("utf-8"))
+                                    self.wfile.flush()
+
+                            elif event_type == "message_stop":
                                 self.wfile.write(b"data: [DONE]\n\n")
                                 self.wfile.flush()
                                 break
 
-                            try:
-                                event = json.loads(event_data)
-                                event_type = event.get("type")
+                        except json.JSONDecodeError:
+                            pass
 
-                                if event_type == "content_block_delta":
-                                    delta = event.get("delta", {})
-                                    if delta.get("type") == "text_delta":
-                                        text = delta.get("text", "")
-                                        # Send the text chunk
-                                        chunk_data = json.dumps({"type": "text", "text": text})
-                                        self.wfile.write(f"data: {chunk_data}\n\n".encode("utf-8"))
-                                        self.wfile.flush()
-
-                                elif event_type == "message_stop":
-                                    self.wfile.write(b"data: [DONE]\n\n")
-                                    self.wfile.flush()
-                                    break
-
-                            except json.JSONDecodeError:
-                                pass
+                response.close()
 
             except urllib.error.HTTPError as e:
                 error_body = e.read().decode("utf-8")
@@ -155,6 +163,7 @@ class ForkHandler(SimpleHTTPRequestHandler):
 
             # Get API key from request header
             api_key = self.headers.get("X-API-Key")
+            print(f"[Chat] API key received: {api_key[:10] if api_key else 'NONE'}...", flush=True)
             if not api_key:
                 self.send_json_error(400, "Missing API key")
                 return
@@ -163,6 +172,7 @@ class ForkHandler(SimpleHTTPRequestHandler):
             messages = data.get("messages", [])
             system = data.get("system", "You are a helpful learning assistant. Help the user understand concepts deeply by breaking them down, asking clarifying questions, and building on their existing knowledge.")
             model = data.get("model", "claude-sonnet-4-20250514")
+            print(f"[Chat] Request: {len(messages)} messages, model={model}", flush=True)
             max_tokens = data.get("max_tokens", 1024)
 
             anthropic_payload = {
@@ -204,6 +214,7 @@ class ForkHandler(SimpleHTTPRequestHandler):
 
             except urllib.error.HTTPError as e:
                 error_body = e.read().decode("utf-8")
+                print(f"[Chat] HTTPError {e.code}: {error_body}", flush=True)
                 try:
                     error_data = json.loads(error_body)
                     error_message = error_data.get("error", {}).get("message", str(e))
